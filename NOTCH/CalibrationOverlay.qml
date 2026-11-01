@@ -9,6 +9,8 @@ QtObject {
     required property var store
     property bool active: false
     property bool showRectangle: true
+    property bool fineAdjustment: false
+    property bool showDetails: false
     property real rectWidth: 310 / store.compositorScale
     property real rectHeight: store.driverHeight / store.compositorScale
     property real horizontalOffset: 0
@@ -17,13 +19,18 @@ QtObject {
     readonly property var draft: ({ x: rectX, y: 0, width: rectWidth, height: rectHeight, cornerRadius: cornerRadius })
     signal closed()
 
-    function open() {
+    function resetDraft() {
         const r = store.valid ? store.rect : null;
         rectWidth = r ? r.width : 310 / store.compositorScale;
         rectHeight = r ? r.height : store.driverHeight / store.compositorScale;
         horizontalOffset = r ? r.x + r.width / 2 - store.screen.width / 2 : 0;
         cornerRadius = r ? r.cornerRadius : 8;
+    }
+    function open() {
+        resetDraft();
         showRectangle = true;
+        showDetails = false;
+        store.error = "";
         active = true;
     }
     function close() { active = false; closed(); }
@@ -53,7 +60,7 @@ QtObject {
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
             y: Math.max(calibration.rectHeight + 10, 75)
-            text: "Match the colored rectangle to the camera cutout. Green/pink fringes reveal misalignment."
+            text: "Adjust the rectangle until the colored edges disappear behind your camera notch."
             color: "black"; font.pixelSize: 13
         }
     }
@@ -64,17 +71,33 @@ QtObject {
         property real value: 0
         property real minimum: 0
         property real maximum: 600
+        property real step: calibration.fineAdjustment ? 0.1 : 1
         signal adjusted(real value)
-        spacing: 12
-        Text { text: measurement.label; color: "white"; Layout.preferredWidth: 120; font.pixelSize: 14 }
+        spacing: 8
+        Text { text: measurement.label; color: "white"; Layout.preferredWidth: 116; font.pixelSize: 14 }
+        Controls.Button {
+            text: "−"; Layout.preferredWidth: 32
+            enabled: measurement.value > measurement.minimum
+            Accessible.name: "Decrease " + measurement.label
+            onClicked: measurement.adjusted(Math.max(measurement.minimum, measurement.value - measurement.step))
+        }
         Controls.Slider {
             Layout.fillWidth: true
             from: measurement.minimum; to: measurement.maximum
             value: measurement.value
+            stepSize: measurement.step
+            Accessible.name: measurement.label
             onMoved: measurement.adjusted(value)
         }
+        Controls.Button {
+            text: "+"; Layout.preferredWidth: 32
+            enabled: measurement.value < measurement.maximum
+            Accessible.name: "Increase " + measurement.label
+            onClicked: measurement.adjusted(Math.min(measurement.maximum, measurement.value + measurement.step))
+        }
         Controls.TextField {
-            Layout.preferredWidth: 100
+            Layout.preferredWidth: 84
+            Accessible.name: measurement.label + " in logical pixels"
             text: measurement.value.toFixed(3)
             selectByMouse: true
             validator: DoubleValidator { bottom: measurement.minimum; top: measurement.maximum; decimals: 3; notation: DoubleValidator.StandardNotation }
@@ -89,7 +112,7 @@ QtObject {
     property FloatingWindow controls: FloatingWindow {
         title: "Notch calibration"
         visible: calibration.active
-        implicitWidth: 600
+        implicitWidth: 640
         implicitHeight: panel.implicitHeight + 40
         color: "#151923"
         onClosed: calibration.close()
@@ -98,36 +121,43 @@ QtObject {
             id: panel
             anchors { left: parent.left; right: parent.right; top: parent.top; margins: 20 }
             spacing: 14
-            Text { text: "Align the physical camera notch"; color: "white"; font.pixelSize: 21; font.bold: true }
+            Text { text: "Fit your widgets around the notch"; color: "white"; font.pixelSize: 21; font.bold: true }
             Text {
                 Layout.fillWidth: true; wrapMode: Text.WordWrap; color: "#b8c4d8"; font.pixelSize: 13
-                text: "All controls use logical pixels. The screenshot's ~310px width is only a starting estimate. Match the rectangle visually before saving."
+                text: "1. Look at the bright strip at the top of your display.\n2. Adjust the rectangle to match the camera cutout.\n3. Save when the colored edges disappear behind it.\n\nSetup opens on launch until you save a calibration. Changes stay a preview until you save."
             }
             Measurement { Layout.fillWidth: true; label: "Width"; value: calibration.rectWidth; minimum: 10; maximum: Math.min(700, calibration.store.screen ? calibration.store.screen.width : 700); onAdjusted: value => { calibration.rectWidth = value; calibration.cornerRadius = Math.min(calibration.cornerRadius, value / 2); } }
             Measurement { Layout.fillWidth: true; label: "Height"; value: calibration.rectHeight; minimum: 1; maximum: 120; onAdjusted: value => { calibration.rectHeight = value; calibration.cornerRadius = Math.min(calibration.cornerRadius, value / 2); } }
-            Measurement { Layout.fillWidth: true; label: "Horizontal offset"; value: calibration.horizontalOffset; minimum: -250; maximum: 250; onAdjusted: value => calibration.horizontalOffset = value }
+            Measurement { Layout.fillWidth: true; label: "Left / right"; value: calibration.horizontalOffset; minimum: -250; maximum: 250; onAdjusted: value => calibration.horizontalOffset = value }
             Measurement { Layout.fillWidth: true; label: "Corner radius"; value: calibration.cornerRadius; maximum: Math.min(calibration.rectWidth, calibration.rectHeight) / 2; onAdjusted: value => calibration.cornerRadius = value }
+            Controls.CheckBox { text: "Fine adjustment (0.1 px steps)"; checked: calibration.fineAdjustment; onToggled: calibration.fineAdjustment = checked }
+            RowLayout {
+                Controls.Button { text: "Undo adjustments"; onClicked: calibration.resetDraft() }
+                Controls.Button { text: "Center horizontally"; onClicked: calibration.horizontalOffset = 0 }
+            }
+            Controls.CheckBox { text: "Show alignment rectangle"; checked: calibration.showRectangle; onToggled: calibration.showRectangle = checked }
+            Controls.Button { text: calibration.showDetails ? "Hide measurements" : "Show measurements"; onClicked: calibration.showDetails = !calibration.showDetails }
             Text {
                 Layout.fillWidth: true; wrapMode: Text.WordWrap; color: "#b8c4d8"; font.pixelSize: 13
+                visible: calibration.showDetails
                 text: "Logical: x " + calibration.rectX.toFixed(3) + ", y 0, " + calibration.rectWidth.toFixed(3) + " × " + calibration.rectHeight.toFixed(3)
                     + "\nPhysical estimate: " + (calibration.rectWidth * calibration.store.compositorScale).toFixed(1) + " × " + (calibration.rectHeight * calibration.store.compositorScale).toFixed(1)
                     + " px at " + (calibration.store.compositorScale * 100).toFixed(0) + "%"
-                    + "\nDriver reports " + calibration.store.driverHeight + "px height; width and corners require visual alignment."
+                    + "\nValues use logical pixels. Display scaling and KDE settings stay unchanged."
+                    + "\nSaved to: " + calibration.store.configPath
             }
-            Controls.CheckBox { text: "Show calibration rectangle"; checked: calibration.showRectangle; onToggled: calibration.showRectangle = checked }
             Text { Layout.fillWidth: true; wrapMode: Text.WordWrap; text: calibration.store.error; visible: text !== ""; color: "#ff8888" }
             RowLayout {
                 Layout.fillWidth: true
-                Controls.Button { text: "Close without saving"; onClicked: calibration.close() }
+                Controls.Button { text: calibration.store.valid ? "Cancel" : "Set up later"; onClicked: calibration.close() }
                 Item { Layout.fillWidth: true }
                 Controls.Button {
-                    text: calibration.store.saving ? "Saving…" : "Save & close"
-                    enabled: !calibration.store.saving && calibration.rectX >= 0
-                        && calibration.rectX + calibration.rectWidth <= (calibration.store.screen ? calibration.store.screen.width : 0)
+                    text: calibration.store.saving ? "Saving…" : "Save calibration"
+                    enabled: !calibration.store.saving && calibration.store.validRectangle(calibration.draft)
                     onClicked: calibration.store.save(calibration.draft)
                 }
             }
-            Text { Layout.fillWidth: true; text: calibration.store.configPath; color: "#8190a6"; font.pixelSize: 11; wrapMode: Text.WrapAnywhere }
+            Text { Layout.fillWidth: true; text: "Reopen anytime: quickshell ipc -p . call notch calibrate"; color: "#8190a6"; font.pixelSize: 11; wrapMode: Text.WrapAnywhere }
         }
     }
 }

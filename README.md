@@ -21,6 +21,7 @@ The calendar and clock use phase names returned by the [U.S. Naval Observatory A
 - **CAVA**, installed as `cava` on your `PATH`, for the bottom visualizer and Notch's audio bars.
 - An audio backend supported by your CAVA installation. Both audio widgets default to **PipeWire**.
 - An **MPRIS-compatible media player** for Notch's track information and controls.
+- **UPower** and Quickshell's UPower module for laptop charging notices.
 - **Git** to clone the repository, plus standard shell tools including `find` and `readlink`.
 
 The clock and calendar look for Impact, Anton, Bebas Neue, Oswald, Archivo Black, and Arial Black. Install a preferred font for the intended appearance; the calendar falls back to sans-serif.
@@ -180,6 +181,7 @@ Edit [`NOTCH/notch.qml`](NOTCH/notch.qml):
 - `notchWidth` and `notchHeight`: use saved calibration dimensions, falling back to 280 × 37.5 logical pixels before calibration. `wingWidth` controls the side extensions.
 - `debugNotch`: show a calibration rectangle while adjusting placement.
 - For the physical camera cutout, use the [temporary calibration overlay](NOTCH/CALIBRATION.md). Saved logical coordinates drive the layout's position, dimensions, and no-content zone.
+- Calibration setup opens automatically on launch until you save it. **Set up later** skips the current session. Reopen it anytime with `quickshell ipc -p . call notch calibrate`.
 - `debugNotifications`: set to `true` to continuously replay the notification preview; `false` stops it.
 - `uiScale`, `animMs`, and `collapseDelayMs`: size and animation timing.
 - `accent`, `tintFromCover`, and `fontFamily`: appearance and artwork-based coloring.
@@ -190,11 +192,15 @@ Play media in an MPRIS-compatible application, then hover over Notch to expand i
 
 Bluetooth controllers, headphones, earbuds, keyboards, mice, and other devices briefly show a white symbol on the left side of the collapsed notch. A reported Bluetooth battery level adds a ring and percentage on the right; the right wing retracts when battery information is unavailable or the device disconnects. Late battery reports update the notice while it is visible. USB controllers and audio devices are detected through `udevadm`, included with systemd. Notices work without media playback, queue when several devices change, and return to the previous media state. Existing Bluetooth connections are not announced at startup. Plain analog headphone jacks are not monitored.
 
+On laptops, plugging in power briefly shows **Charging** on the left, with a green percentage and SF battery symbol on the right. UPower must report a present system battery; desktops and peripheral batteries do not trigger this notice. Already-connected power is silent on startup. Battery values update live, unplugging dismisses the notice, and media returns afterward. Charging and device notices share the same queue and display duration.
+
 Preview simulated connection and disconnection notices on a running configuration:
 
 ```sh
 quickshell ipc -p . call notch preview
 ```
+
+Preview the charging layout on a laptop with `quickshell ipc -p . call notch previewCharging`.
 
 The notice icons use locally extracted SF Symbols from `${XDG_DATA_HOME:-~/.local/share}/icons/SFSymbols/` when available, with system-icon fallbacks. See [the symbol exporter](NOTCH/symbol-export/README.md) to extract your own downloaded font assets. Apple artwork is kept outside this repository.
 

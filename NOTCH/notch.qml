@@ -1,4 +1,4 @@
-// Media controls and Bluetooth notifications in the MacBook notch.
+// Media controls, device notifications, and laptop charging in the MacBook notch.
 // Run with:  quickshell -p notch.qml
 
 import QtQuick
@@ -19,6 +19,13 @@ ShellRoot {
     property string screenName: "eDP-1"
     NotchCalibration { id: cutout; screen: root.pickScreen() }
     CalibrationOverlay { id: calibrationOverlay; store: cutout }
+    Timer {
+        interval: 300
+        running: cutout.ready
+        onTriggered: {
+            if (!cutout.valid && !calibrationOverlay.active) calibrationOverlay.open();
+        }
+    }
     readonly property real cameraLeft: cutout.valid ? cutout.rect.x : (pickScreen().width - notchWidth) / 2
     readonly property real cameraRight: cameraLeft + notchWidth
     readonly property real safeCompactOffset: cutout.valid
@@ -76,6 +83,26 @@ ShellRoot {
     // edge inside its rounded corner instead of drawing a safety-padding lip.
     readonly property real notificationRightExtent: notificationHasBattery ? notificationBatteryWingWidth
         : cutout.valid ? -cutout.rect.cornerRadius : -notificationRightInset
+    readonly property bool chargingNotice: bluetoothNotifications.current !== null
+        && bluetoothNotifications.current.kind === "charging"
+    readonly property string chargingPercentage: notificationHasBattery ? Math.round(notificationBattery * 100) + "%" : ""
+    readonly property real chargingLeftWidth: Math.ceil(chargingLabelMetrics.advanceWidth) + 14 + cutout.padding
+    readonly property real chargingRightWidth: (notificationHasBattery ? Math.ceil(chargingPercentMetrics.advanceWidth) + 8 : 0)
+        + 32 + 14 + cutout.padding
+    TextMetrics {
+        id: chargingLabelMetrics
+        text: "Charging"
+        font.family: root.fontFamily
+        font.pixelSize: 16
+        font.weight: Font.Medium
+    }
+    TextMetrics {
+        id: chargingPercentMetrics
+        text: root.chargingPercentage
+        font.family: root.fontFamily
+        font.pixelSize: 16
+        font.weight: Font.DemiBold
+    }
 
     BluetoothNotifications {
         id: bluetoothNotifications
@@ -85,11 +112,23 @@ ShellRoot {
         id: usbNotifications
         onConnectionChanged: (device, connected) => bluetoothNotifications.enqueue(device, connected)
     }
+    PowerNotifications {
+        id: powerNotifications
+        onChargingStarted: device => bluetoothNotifications.enqueue(device, true)
+        onBatteryUpdated: device => bluetoothNotifications.updateBattery(device)
+        onUnplugged: bluetoothNotifications.dismiss("power/system-battery")
+    }
     IpcHandler {
         id: notchIpc
         target: "notch"
         function calibrate(): void { calibrationOverlay.open(); }
         function hideCalibration(): void { calibrationOverlay.close(); }
+        function previewCharging(): void {
+            if (!powerNotifications.laptop) return;
+            const device = powerNotifications.snapshot();
+            device.dbusPath = "preview/power";
+            bluetoothNotifications.enqueue(device, true);
+        }
         function preview(): void {
             const examples = [
                 { name: "Preview · Wireless Controller", kind: "controller", icon: "input-gaming", transport: "Bluetooth" },
@@ -750,7 +789,8 @@ ShellRoot {
             // the Qt backing surface can have a slightly different rounded width.
             x: root.cameraRight + rightExtent - width
             // Animate the right edge independently so asymmetric wings keep their placement.
-            property real rightExtent: root.notificationActive ? root.notificationRightExtent
+            property real rightExtent: root.chargingNotice ? root.chargingRightWidth
+                : root.notificationActive ? root.notificationRightExtent
                 : root.expanded ? (root.expandedWidth - root.notchWidth) / 2
                 : root.compact ? (root.compactWidth - root.notchWidth) / 2
                 : root.shown ? root.wingWidth + root.safeMediaRightExtra : 0
@@ -763,7 +803,8 @@ ShellRoot {
             y: 0
             opacity: root.notchVisible ? 1 : 0
 
-            width: root.notificationActive ? root.notchWidth + root.notificationWingWidth
+            width: root.chargingNotice ? root.notchWidth + root.chargingLeftWidth + root.chargingRightWidth
+                 : root.notificationActive ? root.notchWidth + root.notificationWingWidth
                        - root.notificationLeftInset + root.safeNoticeLeftExtra + root.notificationRightExtent
                  : root.expanded ? root.expandedWidth
                  : root.compact ? root.compactWidth
@@ -943,7 +984,7 @@ ShellRoot {
                     anchors.left: parent.left
                     width: parent.width
                     height: root.notchHeight
-                    opacity: root.notificationActive ? 1 : 0
+                    opacity: root.notificationActive && !root.chargingNotice ? 1 : 0
                     visible: opacity > 0.01
                     enabled: false
                     Behavior on opacity { NumberAnimation { duration: 160 } }
@@ -1010,6 +1051,47 @@ ShellRoot {
                             font.family: root.fontFamily
                             font.pixelSize: deviceBattery.level === 1 ? 9 : 10
                             font.weight: Font.DemiBold
+                        }
+                    }
+                }
+
+                // Charging uses both side wings; the calibrated camera remains empty.
+                Item {
+                    id: chargingView
+                    anchors.fill: parent
+                    opacity: root.chargingNotice ? 1 : 0
+                    visible: opacity > 0.01
+                    enabled: false
+                    Behavior on opacity { NumberAnimation { duration: 160 } }
+                    Text {
+                        id: chargingLabel
+                        x: (cutout.valid ? root.cameraLeft - cutout.padding : root.cameraLeft)
+                            - notch.x - width
+                        y: (root.notchHeight - height) / 2
+                        text: "Charging"
+                        color: "white"
+                        font: chargingLabelMetrics.font
+                    }
+                    Row {
+                        id: chargingStatus
+                        x: root.cameraRight + cutout.padding - notch.x
+                        y: (root.notchHeight - height) / 2
+                        height: 24
+                        spacing: 8
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: root.chargingPercentage
+                            visible: root.notificationHasBattery
+                            color: "#30df74"
+                            font: chargingPercentMetrics.font
+                        }
+                        SfSymbol {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 32
+                            height: 22
+                            symbolName: "battery.rtl.fill"
+                            mirror: true
+                            symbolColor: "#30df74"
                         }
                     }
                 }

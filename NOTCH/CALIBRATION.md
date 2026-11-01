@@ -1,20 +1,30 @@
 # Camera cutout calibration
 
-Open the temporary overlay on the running widget configuration:
+Setup opens automatically on every launch until you save a valid calibration.
+**Set up later**, Escape, or closing the window skips the current session;
+setup returns next launch. A saved calibration prevents automatic setup, unless
+the output geometry or scale changes and makes it invalid.
+
+You can also reopen it manually on the running widget configuration:
 
 ```sh
 quickshell ipc -p . call notch calibrate
 ```
 
 The top band is white so the physical black cutout is easy to see. Adjust **width**,
-**height**, **horizontal offset**, and **corner radius** in the separate control
+**height**, **left / right position**, and **corner radius** in the separate control
 window. All controls use logical pixels; physical estimates are also displayed.
 Start with the approximate width and adjust until colored fringes match the
 camera's edges. A screenshot cannot establish the exact physical camera bounds.
 
-**Save & close** writes `${XDG_CONFIG_HOME:-~/.config}/p3r-widgets/notch.json` and
-disables the overlay. **Close without saving**, Escape, or the window close button
-leaves the existing calibration intact. The checkbox hides just the rectangle.
+Use the sliders, type an exact value, or use **− / +** buttons. Enable **Fine
+adjustment** for 0.1px steps. **Undo adjustments** restores the saved rectangle
+or the starting estimate; **Center horizontally** resets the offset. **Show
+measurements** reveals exact coordinates, physical estimates, and the save path.
+
+**Save calibration** writes `${XDG_CONFIG_HOME:-~/.config}/p3r-widgets/notch.json`
+and disables the overlay. **Cancel**, **Set up later**, Escape, or the window
+close button leaves the existing calibration intact. The checkbox hides just the rectangle.
 It can also be disabled remotely:
 
 ```sh
@@ -49,6 +59,9 @@ features are not implemented. The widget remains attached to the top edge.
   A reported battery level opens the right wing with a ring and percentage.
   Without a battery report, that wing retracts behind the physical cutout's
   rounded corner, with no extra background height below the camera.
+- **Laptop charging:** the label occupies the left wing; a percentage and green
+  SF battery symbol occupy the right. Text measurements determine wing widths,
+  with 14px outer margins. Both wings keep the exact calibrated collapsed height.
 - **Track-change peek:** artwork, scrolling metadata, and waveform share one
   row below the cutout.
 - **Expanded music:** artwork stays on the left and the waveform on the right;

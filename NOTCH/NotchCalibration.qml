@@ -15,6 +15,9 @@ QtObject {
     property string error: ""
     property bool saving: false
     property string pendingJson: ""
+    property bool configLoaded: false
+    property bool displayReady: false
+    readonly property bool ready: configLoaded && displayReady
     signal saveCompleted()
 
     function validRectangle(r) {
@@ -67,8 +70,9 @@ QtObject {
         onLoaded: {
             try { calibration.saved = JSON.parse(text()); }
             catch (error) { calibration.saved = null; calibration.error = "Invalid notch calibration file."; }
+            calibration.configLoaded = true;
         }
-        onLoadFailed: calibration.saved = null
+        onLoadFailed: { calibration.saved = null; calibration.configLoaded = true; }
         onSaved: {
             calibration.saved = JSON.parse(calibration.pendingJson);
             calibration.saving = false;
@@ -82,6 +86,7 @@ QtObject {
     property Process displayProbe: Process {
         running: true
         command: ["kscreen-doctor", "-j"]
+        onExited: calibration.displayReady = true
         stdout: StdioCollector {
             onStreamFinished: {
                 try {

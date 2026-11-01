@@ -68,6 +68,11 @@ QtObject {
         if (current !== null) dismissTimer.restart();
     }
 
+    function dismiss(key) {
+        queue = queue.filter(event => event.key !== key);
+        if (current !== null && current.key === key) advance();
+    }
+
     property Timer dismissTimer: Timer {
         interval: notifications.displayMs
         onTriggered: notifications.advance()
