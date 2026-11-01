@@ -20,13 +20,14 @@ ShellRoot {
 
     // ---------- look & behaviour ----------
     property real   wingWidth: 20
+    property real   collapsedLeftInset: 14
     property real   uiScale: 0.58            // expanded player scale
     property real   expandedWidth: 688 * uiScale
     property real   expandedHeight: 334 * uiScale
     property real   compactWidth: Math.max(notchWidth + 80, expandedWidth * 0.94)
     property int    compactPadding: 14
     property real   compactHeight: notchHeight + 40 + compactPadding
-    property real   collapsedRadius: 15
+    property real   collapsedRadius: 12
     property real   expandedRadius: 70 * uiScale
     property real   earRadius: 16  // the concave corners where the island meets the top of the screen
     property color  accent: "#49fffe"        // Persona cyan accent (used when the cover has no usable colour)
@@ -34,13 +35,23 @@ ShellRoot {
     property color  dim: "#9aa0b4"           // Secondary text
     property string fontFamily: "sans-serif"
     property int    animMs: 280              // Snappy, fast open/close speed
+    property int    entranceMs: 420          // gentler reveal when media first starts
     property int    pausedLingerMs: 12000
     property int    trackPeekMs: 3500
     property int    collapseDelayMs: 350
 
     // ---------- Cava Audio Integration ----------
     property int    barCount: 6
+    property real   waveformGain: 1.4
+    property real   waveformNoiseGate: 0.06
     property var    levels: []
+
+    function waveformLevel(level) {
+        if (!Number.isFinite(level)) return 0;
+        const gate = Math.max(0, Math.min(0.99, waveformNoiseGate));
+        // Gate before applying gain so background noise is not amplified.
+        return Math.max(0, Math.min(1, (level / 100 - gate) / (1 - gate) * waveformGain));
+    }
 
     function cavaConfig() {
         return [
@@ -68,7 +79,7 @@ ShellRoot {
             "monstercat = 0",
             "waves = 1",
             "noise_reduction = 0.77",
-            "ignore = 3",
+            "ignore = " + Math.round(waveformNoiseGate * 100),
         ].join("\n");
     }
 
@@ -86,7 +97,7 @@ ShellRoot {
                 for (let i = 0; i < parts.length; i++) {
                     if (parts[i] === "") continue;
                     const level = Number(parts[i]);
-                    out.push(Number.isFinite(level) ? Math.max(0, Math.min(1, level / 100)) : 0);
+                    out.push(root.waveformLevel(level));
                 }
                 root.levels = out;
             }
@@ -131,54 +142,102 @@ ShellRoot {
         return m + ":" + (s < 10 ? "0" : "") + s;
     }
 
-    // ---------- colour picked from the cover art ----------
-    // Takes the pixels of a tiny copy of the cover and finds its most prominent *vivid* colour.
-    // Dark and grey pixels (usually background) are ignored. The result is then lifted in
-    // saturation and brightness so it still reads clearly on the black island.
-    function dominantFromPixels(d) {
-        const BINS = 24;
-        const wt = [], sr = [], sg = [], sb = [];
-        for (let i = 0; i < BINS; i++) { wt.push(0); sr.push(0); sg.push(0); sb.push(0); }
-        let n = 0, total = 0;
+    // ---------- two prominent colours picked from the cover art ----------
+    // Lift colours to a readable luminance against the black island.
+    function readableCoverColor(color) {
+        function linear(channel) {
+            return channel <= 0.04045 ? channel / 12.92 : Math.pow((channel + 0.055) / 1.055, 2.4);
+        }
+        function luminance(c) {
+            return 0.2126 * linear(c.r) + 0.7152 * linear(c.g) + 0.0722 * linear(c.b);
+        }
+        if (luminance(color) >= 0.22) return color;
+        // Raise brightness first, preserving hue and saturation for dark artwork.
+        const peak = Math.max(color.r, color.g, color.b);
+        if (peak > 0) {
+            const bright = Qt.rgba(color.r / peak, color.g / peak, color.b / peak, 1);
+            if (luminance(bright) >= 0.22) {
+                let lowScale = 1, highScale = 1 / peak;
+                for (let i = 0; i < 12; i++) {
+                    const scale = (lowScale + highScale) / 2;
+                    if (luminance(Qt.rgba(color.r * scale, color.g * scale, color.b * scale, 1)) < 0.22)
+                        lowScale = scale;
+                    else highScale = scale;
+                }
+                return Qt.rgba(color.r * highScale, color.g * highScale, color.b * highScale, 1);
+            }
+            color = bright;
+        }
+        // Deep blues can still be too dim at full brightness; soften them with white.
+        let low = 0, high = 1;
+        for (let i = 0; i < 12; i++) {
+            const mix = (low + high) / 2;
+            const lifted = Qt.rgba(color.r + (1 - color.r) * mix,
+                                   color.g + (1 - color.g) * mix,
+                                   color.b + (1 - color.b) * mix, 1);
+            if (luminance(lifted) < 0.22) low = mix;
+            else high = mix;
+        }
+        return Qt.rgba(color.r + (1 - color.r) * high,
+                       color.g + (1 - color.g) * high,
+                       color.b + (1 - color.b) * high, 1);
+    }
+
+    // Sample once per cover; retain dark hues so they can be lightened.
+    function paletteFromPixels(d) {
+        const bins = {};
+        let n = 0;
         for (let i = 0; i + 3 < d.length; i += 4) {
             if (d[i + 3] < 128) continue;                       // see-through pixel
             n++;
             const r = d[i] / 255, g = d[i + 1] / 255, b = d[i + 2] / 255;
-            const mx = Math.max(r, g, b), c = mx - Math.min(r, g, b);
-            if (mx < 0.18 || c < 0.12) continue;                // near-black or grey
-            let h;
-            if (mx === r) h = ((g - b) / c + 6) % 6;
-            else if (mx === g) h = (b - r) / c + 2;
-            else h = (r - g) / c + 4;
-            const bin = Math.min(BINS - 1, Math.floor(h / 6 * BINS));
-            wt[bin] += c; sr[bin] += r * c; sg[bin] += g * c; sb[bin] += b * c;   // vivid pixels count more
-            total += c;
+            const mx = Math.max(r, g, b), chroma = mx - Math.min(r, g, b);
+            // Ignore near-black backgrounds, but keep dark colours and neutral highlights.
+            if (mx < 0.015 || (mx < 0.12 && chroma / mx < 0.12)) continue;
+            const key = (d[i] >> 4) * 256 + (d[i + 1] >> 4) * 16 + (d[i + 2] >> 4);
+            if (!bins[key]) bins[key] = { r: 0, g: 0, b: 0, count: 0 };
+            const bin = bins[key];
+            bin.r += r; bin.g += g; bin.b += b; bin.count++;
         }
         if (n === 0) return null;
-        if (total < 0.03 * n) return { h: 0, s: 0, v: 0.92 };   // black & white artwork -> soft white
+        const samples = Object.values(bins).sort((a, b) => b.count - a.count);
+        if (samples.length === 0) return [Qt.rgba(0.92, 0.92, 0.92, 1), Qt.rgba(0.55, 0.55, 0.55, 1)];
 
-        // the hue range (a bin plus its two neighbours) with the most weight wins
-        let best = 0, bestScore = -1;
-        for (let b = 0; b < BINS; b++) {
-            const score = wt[(b + BINS - 1) % BINS] * 0.5 + wt[b] + wt[(b + 1) % BINS] * 0.5;
-            if (score > bestScore) { bestScore = score; best = b; }
+        function distance(a, b) {
+            return Math.pow(a.r - b.r, 2) + Math.pow(a.g - b.g, 2) + Math.pow(a.b - b.b, 2);
         }
-        let R = 0, G = 0, B = 0, W = 0;
-        for (let k = -1; k <= 1; k++) {
-            const b = (best + k + BINS) % BINS;
-            R += sr[b]; G += sg[b]; B += sb[b]; W += wt[b];
+        // Group similar shades and rank their actual coverage, rather than saturation.
+        const clusters = [];
+        for (const sample of samples) {
+            const color = { r: sample.r / sample.count, g: sample.g / sample.count,
+                            b: sample.b / sample.count, count: sample.count };
+            let nearest = null, nearestDistance = 0.04;
+            for (const cluster of clusters) {
+                const delta = distance(color, cluster);
+                if (delta < nearestDistance) { nearest = cluster; nearestDistance = delta; }
+            }
+            if (!nearest) { clusters.push(color); continue; }
+            const count = nearest.count + color.count;
+            nearest.r = (nearest.r * nearest.count + color.r * color.count) / count;
+            nearest.g = (nearest.g * nearest.count + color.g * color.count) / count;
+            nearest.b = (nearest.b * nearest.count + color.b * color.count) / count;
+            nearest.count = count;
         }
-        R /= W; G /= W; B /= W;
-
-        const mx = Math.max(R, G, B), c = mx - Math.min(R, G, B);
-        let h = 0;
-        if (c > 0) {
-            if (mx === R) h = ((G - B) / c + 6) % 6;
-            else if (mx === G) h = (B - R) / c + 2;
-            else h = (R - G) / c + 4;
-            h /= 6;
+        clusters.sort((a, b) => b.count - a.count);
+        const main = clusters[0];
+        const primary = readableCoverColor(Qt.rgba(main.r, main.g, main.b, 1));
+        let secondary = null;
+        for (let i = 1; i < clusters.length; i++) {
+            if (clusters[i].count < main.count * 0.08) break;
+            const c = clusters[i];
+            const candidate = readableCoverColor(Qt.rgba(c.r, c.g, c.b, 1));
+            if (distance(primary, candidate) > 0.025) { secondary = candidate; break; }
         }
-        return { h: h, s: Math.min(1, Math.max(0.45, c / mx)), v: Math.max(0.85, mx) };
+        if (!secondary) {
+            secondary = readableCoverColor(primary.r + primary.g + primary.b > 2.2
+                ? Qt.darker(primary, 1.4) : Qt.lighter(primary, 1.3));
+        }
+        return [primary, secondary];
     }
 
     // the colour actually used by the progress bar and waveform; it fades between songs
@@ -186,15 +245,30 @@ ShellRoot {
         id: tint
         property bool has: false
         property color picked: "white"
+        property color pickedSecondary: "white"
         readonly property color target: (root.tintFromCover && has) ? picked : root.accent
+        readonly property color secondaryTarget: (root.tintFromCover && has) ? pickedSecondary : root.accent
         property color value: target
+        property color secondaryValue: secondaryTarget
         Behavior on value { ColorAnimation { duration: 450 } }
+        Behavior on secondaryValue { ColorAnimation { duration: 450 } }
     }
 
     readonly property var  player: pickPlayer()
     readonly property bool playing: player !== null && player.playbackState === MprisPlaybackState.Playing
 
     property bool shown: false
+    property bool opening: false
+    onShownChanged: {
+        opening = shown;
+        if (shown) entranceTimer.restart();
+        else entranceTimer.stop();
+    }
+    Timer {
+        id: entranceTimer
+        interval: root.entranceMs
+        onTriggered: root.opening = false
+    }
     property bool peek: false
     property bool hovering: false
     property bool hoverLatch: false
@@ -406,6 +480,15 @@ ShellRoot {
         }
     }
 
+    // Each bar blends both cover colours vertically.
+    component WaveBar: Rectangle {
+        gradient: Gradient {
+            orientation: Gradient.Vertical
+            GradientStop { position: 0; color: tint.value }
+            GradientStop { position: 1; color: tint.secondaryValue }
+        }
+    }
+
     // Shared small waveform for the collapsed and track-change views.
     component MiniWaveform: Row {
         id: miniWaveform
@@ -414,14 +497,13 @@ ShellRoot {
         spacing: 3
         Repeater {
             model: root.barCount
-            Rectangle {
+            WaveBar {
                 required property int index
                 id: barRect
                 anchors.verticalCenter: parent.verticalCenter
                 width: 3
                 height: currentHeight
                 radius: width / 2
-                color: tint.value
                 property real currentHeight: 5
 
                 Timer {
@@ -537,7 +619,7 @@ ShellRoot {
             color: "#ff0033"
         }
 
-        // Invisible 32x32 canvas that loads the cover art and hands its pixels to dominantFromPixels()
+        // Sample a tiny copy of the cover when it loads, without per-frame colour analysis.
         Canvas {
             id: coverProbe
             width: 32
@@ -571,9 +653,10 @@ ShellRoot {
                 const ctx = getContext("2d");
                 ctx.clearRect(0, 0, width, height);
                 ctx.drawImage(src, 0, 0, width, height);
-                const dom = root.dominantFromPixels(ctx.getImageData(0, 0, width, height).data);
-                if (dom) {
-                    tint.picked = Qt.hsva(dom.h, dom.s, dom.v, 1);
+                const palette = root.paletteFromPixels(ctx.getImageData(0, 0, width, height).data);
+                if (palette) {
+                    tint.picked = palette[0];
+                    tint.pickedSecondary = palette[1];
                     tint.has = true;
                 } else {
                     tint.has = false;
@@ -583,22 +666,46 @@ ShellRoot {
 
         Item {
             id: island
+            readonly property bool enteringCollapsed: root.opening && !root.expanded && !root.compact
+            property real revealProgress: root.shown ? 1 : 0
+            Behavior on revealProgress {
+                NumberAnimation { duration: root.entranceMs; easing.type: Easing.InOutCubic }
+            }
             anchors.horizontalCenter: parent.horizontalCenter
+            anchors.horizontalCenterOffset: leftInset / 2
+            property real leftInset: root.shown && !root.expanded && !root.compact
+                ? root.collapsedLeftInset : 0
+            Behavior on leftInset {
+                NumberAnimation {
+                    duration: island.enteringCollapsed ? root.entranceMs : root.animMs
+                    easing.type: island.enteringCollapsed ? Easing.InOutCubic : Easing.OutCubic
+                }
+            }
             y: 0
             opacity: root.shown ? 1 : 0
 
             width: root.expanded ? root.expandedWidth
                  : root.compact ? root.compactWidth
-                 : (root.shown ? root.notchWidth + 2 * root.wingWidth : root.notchWidth)
+                 : (root.shown ? root.notchWidth + 2 * root.wingWidth - root.collapsedLeftInset : root.notchWidth)
             height: root.expanded ? root.expandedHeight : root.compact ? root.compactHeight : root.notchHeight
 
             // Use a subtler screen join while collapsed.
             property real ear: root.expanded ? root.earRadius : root.compact ? 8 : 6
             Behavior on ear { NumberAnimation { duration: root.animMs; easing.type: Easing.OutCubic } }
 
-            Behavior on width  { NumberAnimation { duration: root.animMs; easing.type: Easing.OutCubic } }
+            Behavior on width {
+                NumberAnimation {
+                    duration: island.enteringCollapsed ? root.entranceMs : root.animMs
+                    easing.type: island.enteringCollapsed ? Easing.InOutCubic : Easing.OutCubic
+                }
+            }
             Behavior on height { NumberAnimation { duration: root.animMs; easing.type: Easing.OutCubic } }
-            Behavior on opacity { NumberAnimation { duration: 200 } }
+            Behavior on opacity {
+                NumberAnimation {
+                    duration: root.shown ? root.entranceMs : 200
+                    easing.type: Easing.InOutCubic
+                }
+            }
 
             HoverHandler {
                 onHoveredChanged: root.hovering = hovered
@@ -673,7 +780,7 @@ ShellRoot {
                     id: collapsedView
                     anchors.horizontalCenter: parent.horizontalCenter
                     y: 0
-                    width: root.notchWidth + 2 * root.wingWidth
+                    width: root.notchWidth + 2 * root.wingWidth - root.collapsedLeftInset
                     height: root.notchHeight
                     opacity: root.expanded || root.compact ? 0 : 1
                     visible: opacity > 0.01
@@ -681,19 +788,19 @@ ShellRoot {
                     Behavior on opacity { NumberAnimation { duration: 150 } }
 
                     CoverArt {
-                        anchors.left: parent.left
-                        anchors.leftMargin: 9
+                        x: (parent.width - width) / 2 * (1 - island.revealProgress)
+                            + 8 * island.revealProgress
                         anchors.top: parent.top
-                        anchors.topMargin: 4              
-                        height: 26                        
-                        width: 26
-                        radius: 9
+                        anchors.topMargin: 3
+                        height: 28
+                        width: 28
+                        radius: 8
                         source: root.player ? root.player.trackArtUrl : ""
                     }
 
                     MiniWaveform {
-                        anchors.right: parent.right
-                        anchors.rightMargin: 14
+                        x: (parent.width - width) / 2 * (1 - island.revealProgress)
+                            + (parent.width - width - 14) * island.revealProgress
                         anchors.verticalCenter: parent.verticalCenter
                         active: collapsedView.visible
                     }
@@ -784,58 +891,49 @@ ShellRoot {
                         source: root.player ? root.player.trackArtUrl : ""
                     }
 
-                    Text {
-                        x: 181 * expandedView.k
-                        y: 43 * expandedView.k
-                        width: 300 * expandedView.k
-                        text: root.playing ? "NOW PLAYING" : "PAUSED"
-                        color: root.dim
-                        font.family: root.fontFamily
-                        font.pixelSize: 14 * expandedView.k
-                        font.weight: Font.DemiBold
-                        font.letterSpacing: 1.5 * expandedView.k
-                        elide: Text.ElideRight
-                    }
-
-                    // Track metadata stays clear of the playback status and waveform.
+                    // Two metadata lines beside the cover, with space for the waveform.
                     RibbonText {
                         id: trackTitle
                         x: 181 * expandedView.k
-                        y: 78 * expandedView.k
-                        width: 456 * expandedView.k
+                        y: 61 * expandedView.k
+                        width: expandedWaveform.x - x - 24 * expandedView.k
                         text: root.player ? (root.player.trackTitle || root.player.identity) : ""
                         fontFamily: root.fontFamily
                         pixelSize: 26 * expandedView.k
                         active: root.expanded
                         resetKey: root.trackKey
                     }
-                    Text {
+                    RibbonText {
+                        id: trackArtist
                         x: 181 * expandedView.k
-                        y: 112 * expandedView.k
-                        width: 456 * expandedView.k
+                        y: 94 * expandedView.k
+                        width: trackTitle.width
                         text: root.player ? (root.player.trackArtist || root.player.trackAlbum || root.player.identity) : ""
-                        color: root.dim
-                        font.family: root.fontFamily
-                        font.pixelSize: 26 * expandedView.k
-                        elide: Text.ElideRight
+                        textColor: root.dim
+                        fontFamily: root.fontFamily
+                        pixelSize: 26 * expandedView.k
+                        weight: Font.Normal
+                        pixelsPerSecond: 24
+                        active: root.expanded
+                        resetKey: root.trackKey
                     }
 
-                    // level bars, top right, sitting above the title row so the title can use the full width
+                    // Small activity indicator aligned with the metadata row.
                     Row {
+                        id: expandedWaveform
                         x: 637 * expandedView.k - width
-                        y: 60 * expandedView.k - height / 2
+                        y: 85 * expandedView.k - height / 2
                         height: 26 * expandedView.k
-                        spacing: 5.5 * expandedView.k
+                        spacing: 4 * expandedView.k
                         Repeater {
                             model: root.barCount
 
-                            Rectangle {
+                            WaveBar {
                                 required property int index
                                 id: barRect
                                 anchors.verticalCenter: parent.verticalCenter
-                                width: 5 * expandedView.k
+                                width: 4 * expandedView.k
                                 radius: width / 2
-                                color: tint.value
 
                                 property real currentHeight: 6 * expandedView.k
 
@@ -859,9 +957,9 @@ ShellRoot {
                     // elapsed time, progress bar, time remaining
                     Item {
                         id: progress
-                        x: 106 * expandedView.k
-                        y: 175 * expandedView.k
-                        width: 468 * expandedView.k
+                        x: elapsedTime.x + elapsedTime.width + 16 * expandedView.k
+                        y: 180 * expandedView.k
+                        width: Math.max(0, remainingTime.x - 16 * expandedView.k - x)
                         height: 24 * expandedView.k
 
                         // Read the player once in each binding: derived capability flags can
@@ -887,14 +985,16 @@ ShellRoot {
                             id: track
                             anchors.verticalCenter: parent.verticalCenter
                             width: parent.width
-                            height: (root.scrubbing || seekArea.containsMouse ? 14 : 9) * expandedView.k
+                            height: (root.scrubbing || seekArea.containsMouse ? 12 : 8) * expandedView.k
                             radius: height / 2
                             color: "#303036"
                             Behavior on height { NumberAnimation { duration: 120 } }
                             Rectangle {
-                                width: parent.width * progress.ratio
+                                // Keep a full round cap at the start of a track.
+                                width: Math.min(parent.width, Math.max(parent.height, parent.width * progress.ratio))
                                 height: parent.height
-                                radius: parent.radius
+                                radius: height / 2
+                                visible: progress.ratio > 0
                                 color: tint.value
                             }
                         }
@@ -938,32 +1038,36 @@ ShellRoot {
                         }
                     }
                     Text {
-                        x: 43 * expandedView.k
-                        y: 176 * expandedView.k
+                        id: elapsedTime
+                        x: bigArt.x
+                        anchors.verticalCenter: progress.verticalCenter
+                        height: 32 * expandedView.k
+                        verticalAlignment: Text.AlignVCenter
                         text: root.player ? root.fmt(progress.displayedPosition) : ""
                         visible: progress.known
                         color: root.dim
                         font.family: root.fontFamily
-                        font.pixelSize: 20 * expandedView.k
-                        font.weight: Font.DemiBold
+                        font.pixelSize: 22 * expandedView.k
                     }
                     Text {
-                        x: 647 * expandedView.k - width
-                        y: 176 * expandedView.k
+                        id: remainingTime
+                        x: expandedView.width - bigArt.x - width
+                        anchors.verticalCenter: progress.verticalCenter
+                        height: elapsedTime.height
+                        verticalAlignment: Text.AlignVCenter
                         text: root.player ? "-" + root.fmt(Math.max(0, progress.duration - progress.displayedPosition)) : ""
                         visible: progress.known
                         color: root.dim
                         font.family: root.fontFamily
-                        font.pixelSize: 20 * expandedView.k
-                        font.weight: Font.DemiBold
+                        font.pixelSize: elapsedTime.font.pixelSize
                     }
 
                     // rewind  /  play-pause  /  fast-forward, centred on the panel
                     IconButton {
                         width: 51 * expandedView.k
                         height: 30 * expandedView.k
-                        x: 231 * expandedView.k - width / 2
-                        y: 270 * expandedView.k - height / 2
+                        x: 202 * expandedView.k - width / 2
+                        y: 263 * expandedView.k - height / 2
                         kind: "prev"
                         usable: root.player !== null && root.player.canGoPrevious
                         onActivated: root.player.previous()
@@ -972,7 +1076,7 @@ ShellRoot {
                         width: 38 * expandedView.k
                         height: 46 * expandedView.k
                         x: 344 * expandedView.k - width / 2
-                        y: 270 * expandedView.k - height / 2
+                        y: 263 * expandedView.k - height / 2
                         kind: root.playing ? "pause" : "play"
                         usable: root.player !== null && root.player.canTogglePlaying
                         onActivated: root.player.togglePlaying()
@@ -980,8 +1084,8 @@ ShellRoot {
                     IconButton {
                         width: 51 * expandedView.k
                         height: 30 * expandedView.k
-                        x: 457 * expandedView.k - width / 2
-                        y: 270 * expandedView.k - height / 2
+                        x: 486 * expandedView.k - width / 2
+                        y: 263 * expandedView.k - height / 2
                         kind: "next"
                         usable: root.player !== null && root.player.canGoNext
                         onActivated: root.player.next()

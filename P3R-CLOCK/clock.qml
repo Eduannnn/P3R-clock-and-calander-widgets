@@ -2,6 +2,7 @@
 // Run with: quickshell -p clock.qml
 
 import QtQuick
+import "CalendarStyle.js" as CalendarStyle
 import "."
 import "MoonPhase.js" as MoonPhase
 import Quickshell
@@ -19,24 +20,26 @@ ShellRoot {
         // ---------- placement: top-right corner ----------
         // bigger numbers = further away from that edge
         anchors { top: true; right: true }
-        margins { top: -3; right: 3 }
+        margins { top: 5; right: 3 }
 
         // The window sizes itself around its contents (date, triangle, moon),
         // so the left/right edges always hug the content.
         implicitWidth: Math.round((moon.x + moon.width / horizontalScale + 26) * horizontalScale)
         implicitHeight: 96 + topPad
-        // extra room above everything so the big WEEKDAY/WEEKEND letters never get cut off
+        // Extra room above the day-type banner so its letters never get cut off.
         property real topPad: 8
         property real horizontalScale: 0.92
+        property real foregroundOffsetY: -4 // move the time, triangle, and moon together
         color: "transparent"
         exclusionMode: ExclusionMode.Ignore   // don't push other windows around
 
         // ---------- tweakable stuff ----------
         property bool debugWeekendBanner: false // temporary banner preview
         property bool animateWaves: true     // false = freeze the water animation
+        property real waveRefraction: 1.0    // subtle, steady underwater refraction; 0 disables it
 
         // Font preference list: the first one installed on your system is used.
-        property var  fontChoices: ["Impact", "Anton", "Bebas Neue", "Oswald", "Archivo Black", "Arial Black"]
+        property var  fontChoices: ["FOT-RodinNTLG Pro", "FOT-RodinNTLG Pro Cond", "Impact", "Anton", "Bebas Neue", "Oswald", "Archivo Black", "Arial Black"]
         readonly property string displayFont: pickFont(fontChoices)
 
         property color accentCyan: "#35e6ff"
@@ -44,11 +47,11 @@ ShellRoot {
         property color ink: "#0a1450"        // dark navy for outlines and shadows
         property real  dateShadowOpacity: 0.55   // soft shadow under the date; 0 = none
 
-        // WEEKDAY / WEEKEND banner text
-        property real  labelHeight: 48       // how tall the letters are (px)
+        // WEEKDAY / WEEKEND / HOLIDAY banner text
+        property real  labelHeight: 60       // how tall the letters are (px)
         property real  labelBaseline: topPad + 60   // y of the letters' bottom edge; smaller = higher
         property real  labelOffsetX: 2       // horizontal offset of the banner lettering
-        property real  labelGap: -1           // spacing between letters
+        property real  labelGap: -2           // spacing between letters
         property real  fontCapRatio: 0.78    // cap-height / font-size of your font; nudge if the
                                              // letters come out too tall or too short
 
@@ -67,6 +70,16 @@ ShellRoot {
 
         // ---------- derived values ----------
         readonly property var now: clock.date
+        readonly property string dayKey: Qt.formatDate(now, "yyyy-MM-dd")
+        CalendarEvents {
+            id: calendarEvents
+            startDate: win.dayKey
+            endDate: {
+                const parts = win.dayKey.split("-").map(Number);
+                return Qt.formatDate(new Date(parts[0], parts[1] - 1, parts[2] + 1, 12), "yyyy-MM-dd");
+            }
+        }
+        readonly property string todayUnderline: CalendarStyle.underlineColor(now, calendarEvents.meetingDates)
 
         MoonPhaseProvider {
             id: moonPhases
@@ -74,6 +87,13 @@ ShellRoot {
             dates: [new Date(win.now.getFullYear(), win.now.getMonth(), win.now.getDate(), 12)]
         }
         readonly property bool isWeekend: now.getDay() === 0 || now.getDay() === 6
+        // School-calendar events distinguish term-time weekdays from holidays.
+        readonly property bool isSchoolDay: !isWeekend && calendarEvents.configured
+            && calendarEvents.hasSynced && calendarEvents.meetingDates[dayKey] === true
+        // Keep WEEKDAY until calendar data is available to confirm a holiday.
+        readonly property string dayBanner: isWeekend ? "WEEKEND"
+            : calendarEvents.configured && calendarEvents.hasSynced && !isSchoolDay
+                ? "HOLIDAY" : "WEEKDAY"
 
         function pickFont(choices) {
             if (typeof Qt.fontFamilies === "function") {
@@ -85,14 +105,14 @@ ShellRoot {
         }
 
         function periodName(h) {
-            const weekend = win.isWeekend;
+            const schoolDay = win.isSchoolDay;
 
             if (h === 0)              return "Midnight";
-            if (h >= 5  && h < 8)     return weekend ? "Early Morning" : "Before School";
+            if (h >= 5  && h < 8)     return schoolDay ? "Before School" : "Early Morning";
             if (h >= 8  && h < 12)    return "Morning";
-            if (h >= 12 && h < 14)    return weekend ? "Midday" : "Lunchtime";
+            if (h >= 12 && h < 14)    return schoolDay ? "Lunchtime" : "Midday";
             if (h >= 14 && h < 16)    return "Afternoon";
-            if (h >= 16 && h < 18)    return weekend ? "Late Afternoon" : "After School";
+            if (h >= 16 && h < 18)    return schoolDay ? "After School" : "Late Afternoon";
             if (h >= 18 && h < 22)    return "Evening";
             return "Late Night";
         }
@@ -112,7 +132,7 @@ ShellRoot {
                 acceptedButtons: Qt.NoButton
             }
 
-            // ===== Wavy translucent backdrop + the big WEEKDAY / WEEKEND text =====
+            // ===== Wavy translucent backdrop + the day-type banner =====
             Canvas {
                 id: backdrop
                 anchors.fill: parent
@@ -122,8 +142,8 @@ ShellRoot {
                 onTChanged: requestPaint()
 
                 // repaint when the label or the font changes
-                property bool weekend: win.debugWeekendBanner || win.isWeekend
-                onWeekendChanged: requestPaint()
+                property string banner: win.debugWeekendBanner ? "WEEKEND" : win.dayBanner
+                onBannerChanged: requestPaint()
                 property string fontName: win.displayFont
                 onFontNameChanged: requestPaint()
 
@@ -136,6 +156,7 @@ ShellRoot {
                     function onFontCapRatioChanged() { backdrop.requestPaint(); }
                     function onLabelDarkChanged() { backdrop.requestPaint(); }
                     function onLabelLayerColorsChanged() { backdrop.requestPaint(); }
+                    function onWaveRefractionChanged() { backdrop.requestPaint(); }
                 }
 
                 Timer {
@@ -221,18 +242,18 @@ ShellRoot {
 
                     ctx.globalCompositeOperation = "source-over";
 
-                    // ---- Big WEEKDAY / WEEKEND text ----
+                    // ---- Big day-type banner text ----
                     // Dark blue above the waves. Each wave layer then tints the part of the text
                     // below its crest with its own colour, so overlapping layers stack their colours.
 
                     // Measure the letters one by one (so spacing can be added), then stretch
                     // them: sx makes the word fit the width, sy makes it as tall as labelHeight.
-                    const label = weekend ? "WEEKEND" : "WEEKDAY";
+                    const label = banner;
                     const fs = 100;
                     const margin = 14;
                     const gap = win.labelGap * 4;     // in unscaled font units
                     ctx.textBaseline = "alphabetic";
-                    ctx.font = fs + "px " + win.displayFont;
+                    ctx.font = fs + 'px "' + win.displayFont + '"';
                     const ws = [];
                     let total = 0;
                     for (let i = 0; i < label.length; i++) {
@@ -244,18 +265,26 @@ ShellRoot {
                     const sx = (w - 2 * margin) / total;
                     const sy = win.labelHeight / (fs * win.fontCapRatio);
 
-                    function drawLabel(style, dx = 0, dy = 0) {
+                    function drawLabel(style, bandIndex = -1) {
+                        const refraction = bandIndex >= 0 ? Math.max(0, Math.min(2, win.waveRefraction)) : 0;
                         ctx.save();
-                        ctx.translate(margin + win.labelOffsetX + dx, win.labelBaseline + dy);
-                        ctx.scale(sx, sy);
-                        ctx.font = fs + "px " + win.displayFont;
+                        // A small, fixed optical offset at the waterline keeps the word
+                        // readable. The wave clipping moves; individual letters do not.
+                        ctx.translate(margin + win.labelOffsetX, win.labelBaseline + refraction);
+                        ctx.scale(sx, sy * (1 - 0.015 * refraction));
+                        ctx.font = fs + 'px "' + win.displayFont + '"';
                         ctx.textBaseline = "alphabetic";
                         ctx.fillStyle = style;
+                        // Canvas fillText uses an odd-even glyph path, which cuts holes
+                        // where this font's strokes overlap. Fill the outline with winding.
+                        ctx.beginPath();
+                        ctx.fillRule = Qt.WindingFill;
                         let x = 0;
                         for (let i = 0; i < label.length; i++) {
-                            ctx.fillText(label[i], x, 0);
+                            ctx.text(label[i], x, 0);
                             x += ws[i] + gap;
                         }
+                        ctx.fill();
                         ctx.restore();
                     }
 
@@ -289,7 +318,7 @@ ShellRoot {
                         ctx.closePath();
                         ctx.clip();
                         const tint = win.labelLayerColors[k] || "rgba(30,90,230,0.30)";
-                        drawLabel(tint);
+                        drawLabel(tint, k);
                         ctx.restore();
                     }
                 }
@@ -299,7 +328,7 @@ ShellRoot {
             Item {
                 id: dateContainer
                 x: 66
-                y: 14 + win.topPad
+                y: 14 + win.topPad + win.foregroundOffsetY
                 // Keep the shared right edge clear of the triangle and the 2px shadow.
                 width: dayTriangle.x - x - 6
                 height: 46
@@ -371,7 +400,7 @@ ShellRoot {
             Text {
                 id: refDateText
                 x: 66
-                y: 24 + win.topPad
+                y: 24 + win.topPad + win.foregroundOffsetY
                 text: "M/d"
                 font.family: win.displayFont
                 font.pixelSize: 46
@@ -385,7 +414,7 @@ ShellRoot {
                 text: refDateText.text
             }
 
-            // ===== Black down-pointing triangle with exact flush left-edge and right-side clipping =====
+            // ===== Down-pointing triangle matching today's calendar underline =====
             Canvas {
                 id: dayTriangle
                 x: 174
@@ -399,7 +428,9 @@ ShellRoot {
 
                 property string dayText: win.now.toLocaleDateString(Qt.locale("en_US"), "ddd")
                 property string fontName: win.displayFont
+                property color triangleColor: win.todayUnderline === "transparent" ? "#05050f" : win.todayUnderline
 
+                onTriangleColorChanged: requestPaint()
                 onDayTextChanged: requestPaint()
                 onFontNameChanged: requestPaint()
 
@@ -407,8 +438,8 @@ ShellRoot {
                     const ctx = getContext("2d");
                     ctx.reset();
 
-                    // 1. Draw the standard black background triangle shape
-                    ctx.fillStyle = "#05050f";
+                    // 1. Match the date underline, using black when there is no underline.
+                    ctx.fillStyle = triangleColor;
                     ctx.beginPath();
                     ctx.moveTo(0, 0);
                     ctx.lineTo(width, 0);
@@ -428,14 +459,17 @@ ShellRoot {
 
                     // 3. Draw the weekday text at 17px, centered normally
                     ctx.fillStyle = "white";
-                    ctx.font = "17px " + fontName;
+                    ctx.font = '17px "' + fontName + '"';
                     ctx.textBaseline = "alphabetic";
 
                     const metrics = ctx.measureText(dayText);
-                    const textX = (width - metrics.width) / 2; // Perfectly centered
+                    const textX = (width - metrics.width) / 2 - 2;
                     const textY = 21;
 
-                    ctx.fillText(dayText, textX, textY);
+                    ctx.beginPath();
+                    ctx.text(dayText, textX, textY);
+                    ctx.fillRule = Qt.WindingFill;
+                    ctx.fill();
                 }
             }
 
@@ -457,7 +491,7 @@ ShellRoot {
             Text {
                 id: evening
                 x: refDateText.x + refDateText.width / 2
-                y: refDateText.y + refDateText.height - 26
+                y: refDateText.y + refDateText.height - 26 - win.foregroundOffsetY
                 width: dayTriangle.x + dayTriangle.width - x
                 height: 26
                 horizontalAlignment: Text.AlignRight
@@ -481,7 +515,7 @@ ShellRoot {
                 // Cancel the parent's horizontal compression for this circular artwork.
                 transform: Scale { xScale: 1 / win.horizontalScale; yScale: 1 }
                 x: dayTriangle.x + dayTriangle.width + 24
-                y: win.topPad + (parent.height - win.topPad - height) / 2.5 + 10
+                y: win.topPad + (parent.height - win.topPad - height) / 2.5 + 10 + win.foregroundOffsetY
 
                 property string phaseName: moonPhases.phaseName(new Date(win.now.getFullYear(), win.now.getMonth(), win.now.getDate(), 12))
                 property real phase: MoonPhase.phaseForName(phaseName)

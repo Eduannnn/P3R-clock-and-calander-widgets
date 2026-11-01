@@ -134,6 +134,34 @@ Edit [`CALENDAR/CalendarView.qml`](CALENDAR/CalendarView.qml) for `moonColor` an
 
 Edit [`CALENDAR/shell.qml`](CALENDAR/shell.qml) to change the font preference list or date-preview settings. Keep `debugDateCycle: false` and `debugDayOffset: 0` for normal use. Setting `debugDateCycle` to `true` advances the preview date every ten seconds.
 
+#### Outlook / Teams calendar events
+
+The calendar can subscribe to your school's or your own Outlook calendar through its published ICS feed. Teams meetings appear in the corresponding Outlook calendar.
+
+1. In Outlook on the web, open **Settings → Calendar → Shared calendars → Publish a calendar**. Select the calendar and the minimum detail level you need; availability-only is enough for date markers.
+2. Publish it and copy the **ICS** subscription link. Keep this link private: anyone who has it can read the details you published.
+3. From the repository or installed directory, run:
+
+```sh
+./CALENDAR/setup-calendar.sh
+```
+
+The setup script compiles the Rust helper once and installs it to `${XDG_DATA_HOME:-~/.local/share}/p3r-widgets/bin/p3r-calendar-sync`. It uses your installed Cargo/Rust toolchain, or `nix-shell` on NixOS; other systems need Rust and a C compiler for the build. The running widgets only need the compiled executable. Paste the ICS link at the hidden prompt on first setup. The running widgets pick up the configuration within ten seconds.
+
+Rerunning setup preserves an existing subscription and migrates older configurations automatically. Use `./CALENDAR/setup-calendar.sh --configure` to replace the subscription link, or `--build-only` to install the helper without changing configuration. Build artifacts stay in the user's cache directory, outside the repository.
+
+The URL is saved outside the repository in `${XDG_CONFIG_HOME:-~/.config}/p3r-widgets/calendar.json` with owner-only access. Calendar data is cached privately under `${XDG_CACHE_HOME:-~/.cache}/p3r-widgets/`. The widget checks for updates every five minutes and uses cached events if the feed is temporarily unavailable; Outlook controls how quickly published changes become available.
+
+Underlines follow these rules:
+
+- **Monday–Friday:** red when there are no calendar events; no underline when there is an event.
+- **Saturday:** always blue, regardless of events.
+- **Sunday:** always red, regardless of events.
+
+Recurring meetings, moved occurrences, all-day events, and local time zones are supported. Cancelled occurrences are excluded. The clock's day triangle uses the same color as today's underline, falling back to black when there is no underline.
+
+The clock also uses this feed for its school-day labels. A weekday with an event shows “Before School”, “Lunchtime”, and “After School” at the corresponding hours. Weekdays without events and weekends show “Early Morning”, “Midday”, and “Late Afternoon”. Until the calendar has synced, the clock uses these neutral labels. This treats any event in the subscribed school calendar as a school day.
+
 ### CAVA visualizer
 
 Edit [`CAVA/cava.qml`](CAVA/cava.qml):

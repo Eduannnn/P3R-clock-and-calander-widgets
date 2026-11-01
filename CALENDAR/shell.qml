@@ -10,7 +10,7 @@ ShellRoot {
     property int debugDayOffset: 0
     onDebugDateCycleChanged: { if (!debugDateCycle) debugDayOffset = 0; }
     Timer {
-        interval: 10000
+        interval: 15000
         repeat: true
         running: root.debugDateCycle
         onTriggered: root.debugDayOffset++
@@ -20,6 +20,15 @@ ShellRoot {
     readonly property string selectedDayKey: Qt.formatDate(
         new Date(clock.date.getFullYear(), clock.date.getMonth(), clock.date.getDate() + debugDayOffset, 12),
         "yyyy-MM-dd")
+    function dateAtOffset(offset) {
+        const parts = selectedDayKey.split("-").map(Number);
+        return new Date(parts[0], parts[1] - 1, parts[2] + offset, 12);
+    }
+    CalendarEvents {
+        id: calendarEvents
+        startDate: Qt.formatDate(root.dateAtOffset(-6), "yyyy-MM-dd")
+        endDate: Qt.formatDate(root.dateAtOffset(7), "yyyy-MM-dd")
+    }
     MoonPhaseProvider {
         id: moonPhases
         dates: {
@@ -47,6 +56,7 @@ ShellRoot {
                 anchors.fill: parent
                 now: clock.date
                 moonPhaseSource: moonPhases
+                meetingDates: calendarEvents.meetingDates
                 debugDayOffset: root.debugDayOffset
                 displayFont: {
                     const installed = Qt.fontFamilies();

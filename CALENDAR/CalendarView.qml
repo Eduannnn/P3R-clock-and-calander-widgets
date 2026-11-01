@@ -1,4 +1,5 @@
 import QtQuick
+import "CalendarStyle.js" as CalendarStyle
 import "MoonPhase.js" as MoonPhase
 
 Item {
@@ -9,17 +10,61 @@ Item {
     readonly property string dayKey: Qt.formatDate(selectedDate, "yyyy-MM-dd")
     readonly property int targetDay: Date.UTC(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate()) / 86400000
     property bool animationReady: false
-    property int transitionMs: 900
+    property int transitionMs: 650
     property real scrollDay: targetDay
     readonly property int baseDay: Math.floor(scrollDay)
-    Component.onCompleted: animationReady = true
-    Behavior on scrollDay {
-        enabled: calendar.animationReady
-        NumberAnimation { duration: calendar.transitionMs; easing.type: Easing.InOutCubic }
+    property real ringProgress: 1
+    property int ringCollapseMs: 240
+    property int ringExpandMs: 360
+    property real rippleProgress: 1
+    property int rippleMs: 520
+    property real rippleTravel: 44
+    property real inactiveDaySpacing: 100
+    property real activeDaySpacing: 170
+    Component.onCompleted: {
+        // Break the target binding so the rings can close before dates start moving.
+        scrollDay = targetDay;
+        animationReady = true;
+    }
+    onTargetDayChanged: {
+        if (!animationReady) return;
+        dateTransition.stop();
+        rippleProgress = 1;
+        dateScroll.to = targetDay;
+        dateTransition.start();
+    }
+    SequentialAnimation {
+        id: dateTransition
+        NumberAnimation {
+            target: calendar; property: "ringProgress"; to: 0
+            duration: calendar.ringCollapseMs; easing.type: Easing.InOutCubic
+        }
+        NumberAnimation {
+            id: dateScroll
+            target: calendar; property: "scrollDay"
+            duration: calendar.transitionMs; easing.type: Easing.InOutCubic
+        }
+        ParallelAnimation {
+            NumberAnimation {
+                target: calendar; property: "ringProgress"; to: 1
+                duration: calendar.ringExpandMs; easing.type: Easing.OutCubic
+            }
+            SequentialAnimation {
+                // Slightly delay the ripple while retaining overlap with the outer ring.
+                PauseAnimation { duration: Math.round(calendar.ringExpandMs * 0.65) + 40 }
+                ScriptAction { script: calendar.rippleProgress = 0; }
+                NumberAnimation {
+                    target: calendar; property: "rippleProgress"; to: 1
+                    duration: calendar.rippleMs; easing.type: Easing.OutQuad
+                }
+            }
+        }
     }
     property string displayFont: "sans-serif"
     property color accent: "#35e6ff"
     property color moonColor: "#ffe500"
+    // Calendar sync supplies local dates (yyyy-MM-dd) containing meetings.
+    property var meetingDates: ({})
     readonly property real uiScale: Math.min(width / 1440, height / 900)
 
     // The launcher shares one provider across screens; standalone previews use this one.
@@ -29,7 +74,7 @@ Item {
         dates: {
             if (calendar.moonPhaseSource !== localMoonPhases) return [];
             const result = [];
-            for (let i = -5; i <= 5; i++) result.push(calendar.dateForDay(calendar.baseDay + i));
+            for (let i = -6; i <= 6; i++) result.push(calendar.dateForDay(calendar.baseDay + i));
             return result;
         }
     }
@@ -39,6 +84,16 @@ Item {
         return new Date(utc.getUTCFullYear(), utc.getUTCMonth(), utc.getUTCDate(), 12);
     }
     function dayAt(offset) { return dateForDay(targetDay + offset); }
+    function distanceForDay(offset) {
+        // Preserve the selected day's anchor, opening space only around the center.
+        const direction = offset < 0 ? -1 : 1;
+        const distance = Math.abs(offset);
+        return offset * inactiveDaySpacing + direction * (activeDaySpacing - inactiveDaySpacing)
+            * Math.sin(Math.min(1, distance) * Math.PI / 2);
+    }
+    function underlineColor(date) {
+        return CalendarStyle.underlineColor(date, meetingDates);
+    }
 
     // Draw against the actual screen, not the letterboxed reference stage.
     Canvas {
@@ -79,17 +134,29 @@ Item {
         // Only the selected day's concentric circles remain from the blue band.
         Rectangle {
             x: 830 - width / 2; y: 495 - height / 2
-            width: 192; height: width; radius: width / 2
+            width: 192 + 2 * calendar.rippleTravel * calendar.rippleProgress
+            height: width; radius: width / 2
             color: "transparent"
             border.color: "#4086e8"
-            border.width: 9
+            border.width: 9 * (1 - calendar.rippleProgress)
+            opacity: 1 - calendar.rippleProgress
+            visible: opacity > 0.001
         }
         Rectangle {
             x: 830 - width / 2; y: 495 - height / 2
-            width: 96; height: width; radius: width / 2
+            width: 192 * calendar.ringProgress; height: width; radius: width / 2
             color: "transparent"
             border.color: "#4086e8"
-            border.width: 16
+            border.width: 9 * calendar.ringProgress * calendar.ringProgress
+            opacity: calendar.ringProgress
+        }
+        Rectangle {
+            x: 830 - width / 2; y: 495 - height / 2
+            width: 96 * calendar.ringProgress; height: width; radius: width / 2
+            color: "transparent"
+            border.color: "#4086e8"
+            border.width: 16 * calendar.ringProgress * calendar.ringProgress
+            opacity: calendar.ringProgress
         }
 
         Rectangle {
@@ -99,18 +166,19 @@ Item {
         }
 
         Repeater {
-            model: 11
+            model: 13
             Item {
                 id: day
                 required property int index
-                readonly property int serial: calendar.baseDay + index - 5
+                readonly property int serial: calendar.baseDay + index - 6
                 readonly property real offset: serial - calendar.scrollDay
+                readonly property real distance: calendar.distanceForDay(offset)
                 readonly property date date: calendar.dateForDay(serial)
                 readonly property real highlight: Math.max(0, 1 - Math.abs(offset))
-                x: 830 + offset * 155 - 45
-                y: 495 - offset * 98 - 50
+                x: 830 + distance - 45
+                y: 495 - distance * (98 / 155) - 50
                 width: 145; height: 110
-                opacity: Math.max(0, Math.min(1, (5 - Math.abs(offset)) / 2))
+                opacity: Math.max(0, Math.min(1, (6 - Math.abs(offset)) / 2))
                 Text {
                     id: number
                     x: 17; y: 22
@@ -142,8 +210,7 @@ Item {
                        + weekdayInk.tightBoundingRect.height + 1
                     width: weekday.implicitWidth
                     height: 4
-                    visible: day.date.getDay() === 0 || day.date.getDay() === 6
-                    color: day.date.getDay() === 0 ? "#f54d39" : "#2ba9de"
+                    color: calendar.underlineColor(day.date)
                 }
                 TextMetrics {
                     id: weekdayInk
