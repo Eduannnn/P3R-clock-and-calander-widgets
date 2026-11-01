@@ -1,5 +1,5 @@
-// Dynamic-Island style media widget that lives in the MacBook notch.
-// Run with:  quickshell -p island.qml
+// Media controls and Bluetooth notifications in the MacBook notch.
+// Run with:  quickshell -p notch.qml
 
 import QtQuick
 import "."
@@ -13,10 +13,27 @@ ShellRoot {
     id: root
 
     // ---------- notch calibration ----------
-    property real notchWidth: 280
-    property real notchHeight: 38
+    property real notchWidth: cutout.valid ? cutout.rect.width : 280
+    property real notchHeight: cutout.valid ? cutout.rect.height : 37.5
     property bool debugNotch: false
     property string screenName: "eDP-1"
+    NotchCalibration { id: cutout; screen: root.pickScreen() }
+    CalibrationOverlay { id: calibrationOverlay; store: cutout }
+    readonly property real cameraLeft: cutout.valid ? cutout.rect.x : (pickScreen().width - notchWidth) / 2
+    readonly property real cameraRight: cameraLeft + notchWidth
+    readonly property real safeCompactOffset: cutout.valid
+        ? Math.max(0, cutout.rect.y + cutout.rect.height + cutout.padding - notchHeight) : 0
+    readonly property real safeExpandedOffset: cutout.valid
+        ? Math.max(0, cutout.rect.y + cutout.rect.height + cutout.padding - 37 * uiScale) : 0
+    readonly property real safeMediaLeftExtra: cutout.valid ? Math.max(0,
+        cameraLeft - wingWidth + collapsedLeftInset
+            - (cutout.rect.x - cutout.padding - 36)) : 0
+    readonly property real safeMediaRightExtra: cutout.valid ? Math.max(0,
+        cutout.rect.x + cutout.rect.width + cutout.padding + barCount * 3 + (barCount - 1) * 3 + 14
+            - (cameraRight + wingWidth)) : 0
+    readonly property real safeNoticeLeftExtra: cutout.valid ? Math.max(0,
+        cameraLeft - notificationWingWidth + notificationLeftInset
+            - (cutout.rect.x - cutout.padding - 44)) : 0
 
     // ---------- look & behaviour ----------
     property real   wingWidth: 20
@@ -29,7 +46,7 @@ ShellRoot {
     property real   compactHeight: notchHeight + 40 + compactPadding
     property real   collapsedRadius: 12
     property real   expandedRadius: 70 * uiScale
-    property real   earRadius: 16  // the concave corners where the island meets the top of the screen
+    property real   earRadius: 16  // the concave corners where the notch meets the top of the screen
     property color  accent: "#49fffe"        // Persona cyan accent (used when the cover has no usable colour)
     property bool   tintFromCover: true      // progress bar + waveform take the cover art's main colour
     property color  dim: "#9aa0b4"           // Secondary text
@@ -39,6 +56,62 @@ ShellRoot {
     property int    pausedLingerMs: 12000
     property int    trackPeekMs: 3500
     property int    collapseDelayMs: 350
+    property int    bluetoothNoticeMs: 4000
+    property bool   debugNotifications: false // repeat the existing notification preview
+    onDebugNotificationsChanged: {
+        if (debugNotifications) return;
+        bluetoothNotifications.queue = bluetoothNotifications.queue.filter(event => !event.key.startsWith("preview/"));
+        if (bluetoothNotifications.current && bluetoothNotifications.current.key.startsWith("preview/"))
+            bluetoothNotifications.advance();
+    }
+    property real   notificationWingWidth: 44
+    property real   notificationRightInset: 40.5
+    property real   notificationLeftInset: 32
+    property real   notificationBatteryWingWidth: 44
+    readonly property var notificationBattery: bluetoothNotifications.current
+        ? bluetoothNotifications.current.battery : null
+    readonly property bool notificationHasBattery: typeof notificationBattery === "number"
+        && Number.isFinite(notificationBattery) && notificationBattery >= 0 && notificationBattery <= 1
+    // The physical cutout supplies the black center. Hide the empty trailing
+    // edge inside its rounded corner instead of drawing a safety-padding lip.
+    readonly property real notificationRightExtent: notificationHasBattery ? notificationBatteryWingWidth
+        : cutout.valid ? -cutout.rect.cornerRadius : -notificationRightInset
+
+    BluetoothNotifications {
+        id: bluetoothNotifications
+        displayMs: root.bluetoothNoticeMs
+    }
+    UsbNotifications {
+        id: usbNotifications
+        onConnectionChanged: (device, connected) => bluetoothNotifications.enqueue(device, connected)
+    }
+    IpcHandler {
+        id: notchIpc
+        target: "notch"
+        function calibrate(): void { calibrationOverlay.open(); }
+        function hideCalibration(): void { calibrationOverlay.close(); }
+        function preview(): void {
+            const examples = [
+                { name: "Preview · Wireless Controller", kind: "controller", icon: "input-gaming", transport: "Bluetooth" },
+                { name: "Preview · Wireless Earbuds", kind: "earbuds", icon: "audio-headphones", transport: "Bluetooth", batteryAvailable: true, battery: 0.75 },
+                { name: "Preview · USB Headset", kind: "headphones", icon: "audio-headset", transport: "USB" },
+                { name: "Preview · Wireless Controller", kind: "controller", icon: "input-gaming", transport: "Bluetooth", connected: false }
+            ];
+            for (const device of examples) {
+                device.dbusPath = "preview/" + device.name;
+                bluetoothNotifications.enqueue(device, device.connected !== false);
+            }
+        }
+    }
+    Timer {
+        interval: root.bluetoothNoticeMs * 4 + root.entranceMs
+        running: root.debugNotifications
+        repeat: true
+        triggeredOnStart: true
+        onTriggered: notchIpc.preview()
+    }
+    readonly property bool notificationActive: bluetoothNotifications.current !== null
+    readonly property bool notchVisible: shown || notificationActive
 
     // ---------- Cava Audio Integration ----------
     property int    barCount: 6
@@ -143,7 +216,7 @@ ShellRoot {
     }
 
     // ---------- two prominent colours picked from the cover art ----------
-    // Lift colours to a readable luminance against the black island.
+    // Lift colours to a readable luminance against the black notch.
     function readableCoverColor(color) {
         function linear(channel) {
             return channel <= 0.04045 ? channel / 12.92 : Math.pow((channel + 0.055) / 1.055, 2.4);
@@ -259,9 +332,9 @@ ShellRoot {
 
     property bool shown: false
     property bool opening: false
-    onShownChanged: {
-        opening = shown;
-        if (shown) entranceTimer.restart();
+    onNotchVisibleChanged: {
+        opening = notchVisible;
+        if (notchVisible) entranceTimer.restart();
         else entranceTimer.stop();
     }
     Timer {
@@ -273,8 +346,8 @@ ShellRoot {
     property bool hovering: false
     property bool hoverLatch: false
     property bool scrubbing: false
-    readonly property bool expanded: shown && (hoverLatch || scrubbing)
-    readonly property bool compact: shown && peek && !expanded
+    readonly property bool expanded: shown && !notificationActive && (hoverLatch || scrubbing)
+    readonly property bool compact: shown && !notificationActive && peek && !expanded
 
     onHoveringChanged: {
         if (hovering) { collapseTimer.stop(); hoverLatch = true; }
@@ -334,7 +407,7 @@ ShellRoot {
     function logSeek(event) {
         if (!debugSeeking) return;
         const p = root.player;
-        console.log("island-seek " + JSON.stringify({
+        console.log("notch-seek " + JSON.stringify({
             event: event, player: p ? p.identity : null,
             track: p ? p.uniqueId : null,
             position: p ? p.position : null, livePosition: livePos,
@@ -595,27 +668,29 @@ ShellRoot {
         id: win
         screen: root.pickScreen()
 
-        anchors { top: true }
+        visible: !calibrationOverlay.active
+        anchors { top: true; left: true; right: true }
         implicitWidth: Math.max(root.expandedWidth, root.compactWidth) + 2 * root.earRadius + 40
-        implicitHeight: Math.max(root.expandedHeight, root.compactHeight) + 30
+        implicitHeight: Math.max(root.expandedHeight + root.safeExpandedOffset,
+            root.compactHeight + root.safeCompactOffset) + 30
         color: "transparent"
         exclusionMode: ExclusionMode.Ignore
         WlrLayershell.layer: WlrLayer.Overlay
 
         mask: Region {
-            x: island.x
-            y: island.y
-            width: root.shown ? island.width : 0
-            height: root.shown ? island.height : 0
+            x: notch.x
+            y: notch.y
+            width: root.notchVisible ? notch.width : 0
+            height: root.notchVisible ? notch.height : 0
         }
 
         Rectangle {
             visible: root.debugNotch
             z: 999
-            anchors.horizontalCenter: parent.horizontalCenter
-            y: 0
-            width: root.notchWidth
-            height: root.notchHeight
+            x: cutout.valid ? cutout.rect.x : (parent.width - root.notchWidth) / 2
+            y: cutout.valid ? cutout.rect.y : 0
+            width: cutout.valid ? cutout.rect.width : root.notchWidth
+            height: cutout.valid ? cutout.rect.height : root.notchHeight
             color: "#ff0033"
         }
 
@@ -665,29 +740,40 @@ ShellRoot {
         }
 
         Item {
-            id: island
+            id: notch
             readonly property bool enteringCollapsed: root.opening && !root.expanded && !root.compact
-            property real revealProgress: root.shown ? 1 : 0
+            property real revealProgress: root.notchVisible ? 1 : 0
             Behavior on revealProgress {
                 NumberAnimation { duration: root.entranceMs; easing.type: Easing.InOutCubic }
             }
-            anchors.horizontalCenter: parent.horizontalCenter
-            anchors.horizontalCenterOffset: leftInset / 2
-            property real leftInset: root.shown && !root.expanded && !root.compact
-                ? root.collapsedLeftInset : 0
-            Behavior on leftInset {
+            // Output-local positioning preserves fractional calibration coordinates;
+            // the Qt backing surface can have a slightly different rounded width.
+            x: root.cameraRight + rightExtent - width
+            // Animate the right edge independently so asymmetric wings keep their placement.
+            property real rightExtent: root.notificationActive ? root.notificationRightExtent
+                : root.expanded ? (root.expandedWidth - root.notchWidth) / 2
+                : root.compact ? (root.compactWidth - root.notchWidth) / 2
+                : root.shown ? root.wingWidth + root.safeMediaRightExtra : 0
+            Behavior on rightExtent {
                 NumberAnimation {
-                    duration: island.enteringCollapsed ? root.entranceMs : root.animMs
-                    easing.type: island.enteringCollapsed ? Easing.InOutCubic : Easing.OutCubic
+                    duration: notch.enteringCollapsed ? root.entranceMs : root.animMs
+                    easing.type: notch.enteringCollapsed ? Easing.InOutCubic : Easing.OutCubic
                 }
             }
             y: 0
-            opacity: root.shown ? 1 : 0
+            opacity: root.notchVisible ? 1 : 0
 
-            width: root.expanded ? root.expandedWidth
+            width: root.notificationActive ? root.notchWidth + root.notificationWingWidth
+                       - root.notificationLeftInset + root.safeNoticeLeftExtra + root.notificationRightExtent
+                 : root.expanded ? root.expandedWidth
                  : root.compact ? root.compactWidth
-                 : (root.shown ? root.notchWidth + 2 * root.wingWidth - root.collapsedLeftInset : root.notchWidth)
-            height: root.expanded ? root.expandedHeight : root.compact ? root.compactHeight : root.notchHeight
+                 : (root.notchVisible ? root.notchWidth + 2 * root.wingWidth - root.collapsedLeftInset
+                     + root.safeMediaLeftExtra + root.safeMediaRightExtra : root.notchWidth)
+            // Safety padding excludes foreground content; it never adds to
+            // the resting black body's calibrated height, even with a battery.
+            height: root.expanded ? root.expandedHeight + root.safeExpandedOffset
+                : root.compact ? root.compactHeight + root.safeCompactOffset
+                : root.notchHeight
 
             // Use a subtler screen join while collapsed.
             property real ear: root.expanded ? root.earRadius : root.compact ? 8 : 6
@@ -695,19 +781,20 @@ ShellRoot {
 
             Behavior on width {
                 NumberAnimation {
-                    duration: island.enteringCollapsed ? root.entranceMs : root.animMs
-                    easing.type: island.enteringCollapsed ? Easing.InOutCubic : Easing.OutCubic
+                    duration: notch.enteringCollapsed ? root.entranceMs : root.animMs
+                    easing.type: notch.enteringCollapsed ? Easing.InOutCubic : Easing.OutCubic
                 }
             }
             Behavior on height { NumberAnimation { duration: root.animMs; easing.type: Easing.OutCubic } }
             Behavior on opacity {
                 NumberAnimation {
-                    duration: root.shown ? root.entranceMs : 200
+                    duration: root.notchVisible ? root.entranceMs : 200
                     easing.type: Easing.InOutCubic
                 }
             }
 
             HoverHandler {
+                enabled: !root.notificationActive
                 onHoveredChanged: root.hovering = hovered
             }
 
@@ -723,12 +810,12 @@ ShellRoot {
             }
 
             // left ear: a black corner piece with a quarter circle cut out, so the sides of the
-            // island flare outward into the top edge of the screen
+            // notch flare outward into the top edge of the screen
             Canvas {
-                visible: island.ear > 0.5
-                width: island.ear + 1
-                height: island.ear
-                x: -island.ear
+                visible: notch.ear > 0.5
+                width: notch.ear + 1
+                height: notch.ear
+                x: -notch.ear
                 y: 0
                 onWidthChanged: requestPaint()
                 onHeightChanged: requestPaint()
@@ -748,10 +835,10 @@ ShellRoot {
             }
             // right ear: the mirror image
             Canvas {
-                visible: island.ear > 0.5
-                width: island.ear + 1
-                height: island.ear
-                x: island.width - 1
+                visible: notch.ear > 0.5
+                width: notch.ear + 1
+                height: notch.ear
+                x: notch.width - 1
                 y: 0
                 onWidthChanged: requestPaint()
                 onHeightChanged: requestPaint()
@@ -770,45 +857,167 @@ ShellRoot {
                 }
             }
 
-            // everything inside the island is clipped to it while it grows and shrinks
+            // Hard exclusion also protects transitional frames as the widget moves/resizes.
+            Canvas {
+                id: cutoutMask
+                width: notch.width; height: notch.height
+                property real holeX: cutout.valid ? cutout.rect.x - notch.x - cutout.padding : 0
+                property real holeY: cutout.valid ? cutout.rect.y - notch.y - cutout.padding : 0
+                property real holeWidth: cutout.valid ? cutout.rect.width + cutout.padding * 2 : 0
+                property real holeHeight: cutout.valid ? cutout.rect.height + cutout.padding * 2 : 0
+                onHoleXChanged: requestPaint()
+                onHoleYChanged: requestPaint()
+                onHoleWidthChanged: requestPaint()
+                onHoleHeightChanged: requestPaint()
+                onWidthChanged: requestPaint()
+                onHeightChanged: requestPaint()
+                onPaint: {
+                    const ctx = getContext("2d");
+                    ctx.reset();
+                    ctx.fillStyle = "white";
+                    ctx.fillRect(0, 0, width, height);
+                    ctx.clearRect(Math.floor(holeX), Math.floor(holeY),
+                        Math.ceil(holeX + holeWidth) - Math.floor(holeX),
+                        Math.ceil(holeY + holeHeight) - Math.floor(holeY));
+                }
+            }
+            ShaderEffectSource {
+                id: cutoutTexture
+                sourceItem: cutoutMask
+                hideSource: true
+                visible: false
+                live: true
+            }
+
+            // Only foreground content is masked; the black background may span the cutout.
             Item {
+                id: safeContent
                 anchors.fill: parent
                 clip: true
+                visible: cutout.saved === null || cutout.valid
+                layer.enabled: cutout.valid
+                layer.effect: MultiEffect { maskEnabled: true; maskSource: cutoutTexture }
 
                 // ===== collapsed view =====
                 Item {
                     id: collapsedView
                     anchors.horizontalCenter: parent.horizontalCenter
                     y: 0
-                    width: root.notchWidth + 2 * root.wingWidth - root.collapsedLeftInset
+                    width: parent.width
                     height: root.notchHeight
-                    opacity: root.expanded || root.compact ? 0 : 1
+                    opacity: root.expanded || root.compact || root.notificationActive ? 0 : 1
                     visible: opacity > 0.01
-                    enabled: !root.expanded && !root.compact
+                    enabled: !root.expanded && !root.compact && !root.notificationActive
                     Behavior on opacity { NumberAnimation { duration: 150 } }
 
                     CoverArt {
-                        x: (parent.width - width) / 2 * (1 - island.revealProgress)
-                            + 8 * island.revealProgress
-                        anchors.top: parent.top
-                        anchors.topMargin: 3
+                        id: collapsedArt
+                        x: cutout.valid ? cutout.rect.x - notch.x - collapsedView.x - cutout.padding - width
+                                - (1 - notch.revealProgress) * 8
+                            : (parent.width - width) / 2 * (1 - notch.revealProgress) + 8 * notch.revealProgress
+                        y: cutout.valid ? (root.notchHeight - height) / 2 - 1.8 : 2
                         height: 28
                         width: 28
                         radius: 8
                         source: root.player ? root.player.trackArtUrl : ""
+                        opacity: root.shown && !root.notificationActive ? 1 : 0
+                        Behavior on opacity { NumberAnimation { duration: 160 } }
                     }
 
                     MiniWaveform {
-                        x: (parent.width - width) / 2 * (1 - island.revealProgress)
-                            + (parent.width - width - 14) * island.revealProgress
+                        id: collapsedWaveform
+                        x: cutout.valid ? cutout.rect.x + cutout.rect.width - notch.x - collapsedView.x + cutout.padding
+                                + (1 - notch.revealProgress) * 8
+                            : (parent.width - width) / 2 * (1 - notch.revealProgress)
+                                + (parent.width - width - 14) * notch.revealProgress
                         anchors.verticalCenter: parent.verticalCenter
-                        active: collapsedView.visible
+                        active: collapsedView.visible && root.shown
+                        opacity: root.shown ? 1 : 0
+                        Behavior on opacity { NumberAnimation { duration: 160 } }
+                    }
+                }
+
+                // A device symbol briefly replaces the cover in the left wing.
+                Item {
+                    id: notificationView
+                    anchors.left: parent.left
+                    width: parent.width
+                    height: root.notchHeight
+                    opacity: root.notificationActive ? 1 : 0
+                    visible: opacity > 0.01
+                    enabled: false
+                    Behavior on opacity { NumberAnimation { duration: 160 } }
+                    // Retain the last symbol while this view fades away.
+                    property var notice: null
+                    Connections {
+                        target: bluetoothNotifications
+                        function onCurrentChanged() {
+                            if (bluetoothNotifications.current !== null)
+                                notificationView.notice = bluetoothNotifications.current;
+                        }
+                    }
+                    DeviceSymbol {
+                        id: deviceSymbol
+                        x: cutout.valid ? cutout.rect.x - notch.x - cutout.padding - width - 4 : 8
+                        y: cutout.valid ? (root.notchHeight - height) / 2 : 3
+                        width: 28
+                        height: 28
+                        kind: notificationView.notice ? notificationView.notice.kind : "bluetooth"
+                        fallbackIcon: notificationView.notice ? notificationView.notice.icon : "bluetooth"
+                    }
+                    // Only real, reported battery levels reserve a trailing wing.
+                    Item {
+                        id: deviceBattery
+                        x: (cutout.valid ? root.cameraRight + cutout.padding : (win.width + root.notchWidth) / 2)
+                            - notch.x + 4
+                        y: (root.notchHeight - height) / 2
+                        width: 28
+                        height: 28
+                        visible: root.notificationActive && root.notificationHasBattery
+                        readonly property real level: root.notificationHasBattery ? root.notificationBattery : 0
+                        readonly property color ringColor: level <= 0.2 ? "#ff654f" : "#30df74"
+                        Canvas {
+                            id: batteryCanvas
+                            anchors.fill: parent
+                            onPaint: {
+                                const ctx = getContext("2d");
+                                ctx.reset();
+                                ctx.lineWidth = 2.5;
+                                ctx.strokeStyle = Qt.rgba(deviceBattery.ringColor.r, deviceBattery.ringColor.g,
+                                    deviceBattery.ringColor.b, 0.25);
+                                ctx.beginPath();
+                                ctx.arc(width / 2, height / 2, width / 2 - 2, 0, Math.PI * 2);
+                                ctx.stroke();
+                                if (deviceBattery.level > 0) {
+                                    ctx.strokeStyle = deviceBattery.ringColor;
+                                    ctx.lineCap = "round";
+                                    ctx.beginPath();
+                                    ctx.arc(width / 2, height / 2, width / 2 - 2,
+                                        -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * deviceBattery.level);
+                                    ctx.stroke();
+                                }
+                            }
+                            Connections {
+                                target: deviceBattery
+                                function onLevelChanged() { batteryCanvas.requestPaint(); }
+                                function onRingColorChanged() { batteryCanvas.requestPaint(); }
+                            }
+                        }
+                        Text {
+                            anchors.centerIn: parent
+                            text: Math.round(deviceBattery.level * 100)
+                            color: deviceBattery.ringColor
+                            font.family: root.fontFamily
+                            font.pixelSize: deviceBattery.level === 1 ? 9 : 10
+                            font.weight: Font.DemiBold
+                        }
                     }
                 }
 
                 // Compact track-change peek sits below the physical camera notch.
                 Item {
                     id: compactView
+                    y: root.safeCompactOffset
                     anchors.horizontalCenter: parent.horizontalCenter
                     width: root.compactWidth
                     height: root.compactHeight
@@ -835,7 +1044,8 @@ ShellRoot {
                     RibbonText {
                         id: compactTitle
                         x: compactArt.x + compactArt.width + root.compactPadding
-                        y: compactArt.y + 2
+                        y: compactArt.y + (compactArt.height - height
+                            - (compactArtist.visible ? compactArtist.height + 3 : 0)) / 2
                         width: Math.max(0, compactWaveform.x - x - root.compactPadding)
                         text: root.player ? (root.player.trackTitle || root.player.identity) : ""
                         fontFamily: root.fontFamily
@@ -846,9 +1056,10 @@ ShellRoot {
                     RibbonText {
                         id: compactArtist
                         x: compactTitle.x
-                        y: compactArt.y + 23
+                        y: compactTitle.y + compactTitle.height + 3
                         width: compactTitle.width
-                        text: root.player ? (root.player.trackArtist || root.player.trackAlbum || root.player.identity) : ""
+                        text: root.player ? (root.player.trackArtist || root.player.trackAlbum || "") : ""
+                        visible: text.length > 0
                         fontFamily: root.fontFamily
                         pixelSize: 11.5
                         weight: Font.Normal
@@ -867,12 +1078,17 @@ ShellRoot {
                 }
 
                 // ===== expanded view =====
-                // Coordinates share a reference size of 688 x 334 and scale together.
+                // Scaled artwork and glyphs share rows with consistent logical insets.
                 Item {
                     id: expandedView
                     property real k: root.uiScale
+                    readonly property real layoutInset: root.compactPadding
+                    readonly property real progressInset: layoutInset + 14
+                    readonly property real metadataHeight: trackTitle.height
+                        + (trackArtist.visible ? trackArtist.height + 4 : 0)
+                    readonly property real controlsCenterY: height - layoutInset - 23 * k - 10
                     anchors.horizontalCenter: parent.horizontalCenter
-                    y: 0
+                    y: root.safeExpandedOffset
                     width: root.expandedWidth
                     height: root.expandedHeight
                     opacity: root.expanded ? 1 : 0
@@ -883,7 +1099,7 @@ ShellRoot {
                     // cover art
                     CoverArt {
                         id: bigArt
-                        x: 37 * expandedView.k
+                        x: expandedView.layoutInset
                         y: 37 * expandedView.k
                         width: 112 * expandedView.k
                         height: 112 * expandedView.k
@@ -894,9 +1110,9 @@ ShellRoot {
                     // Two metadata lines beside the cover, with space for the waveform.
                     RibbonText {
                         id: trackTitle
-                        x: 181 * expandedView.k
-                        y: 61 * expandedView.k
-                        width: expandedWaveform.x - x - 24 * expandedView.k
+                        x: bigArt.x + bigArt.width + expandedView.layoutInset
+                        y: bigArt.y + (bigArt.height - expandedView.metadataHeight) / 2
+                        width: Math.max(0, expandedWaveform.x - x - expandedView.layoutInset)
                         text: root.player ? (root.player.trackTitle || root.player.identity) : ""
                         fontFamily: root.fontFamily
                         pixelSize: 26 * expandedView.k
@@ -905,26 +1121,28 @@ ShellRoot {
                     }
                     RibbonText {
                         id: trackArtist
-                        x: 181 * expandedView.k
-                        y: 94 * expandedView.k
+                        x: trackTitle.x
+                        y: trackTitle.y + trackTitle.height + 4
                         width: trackTitle.width
-                        text: root.player ? (root.player.trackArtist || root.player.trackAlbum || root.player.identity) : ""
+                        text: root.player ? (root.player.trackArtist || root.player.trackAlbum || "") : ""
+                        visible: text.length > 0
                         textColor: root.dim
                         fontFamily: root.fontFamily
-                        pixelSize: 26 * expandedView.k
+                        pixelSize: 22 * expandedView.k
                         weight: Font.Normal
                         pixelsPerSecond: 24
                         active: root.expanded
                         resetKey: root.trackKey
                     }
 
-                    // Small activity indicator aligned with the metadata row.
+                    // Activity indicator aligned with the metadata row.
                     Row {
                         id: expandedWaveform
-                        x: 637 * expandedView.k - width
-                        y: 85 * expandedView.k - height / 2
-                        height: 26 * expandedView.k
-                        spacing: 4 * expandedView.k
+                        readonly property real barScale: expandedView.k * 1.4
+                        x: expandedView.width - expandedView.layoutInset - width
+                        y: bigArt.y + (bigArt.height - height) / 2
+                        height: 26 * barScale
+                        spacing: 4 * barScale
                         Repeater {
                             model: root.barCount
 
@@ -932,10 +1150,10 @@ ShellRoot {
                                 required property int index
                                 id: barRect
                                 anchors.verticalCenter: parent.verticalCenter
-                                width: 4 * expandedView.k
+                                width: 4 * expandedWaveform.barScale
                                 radius: width / 2
 
-                                property real currentHeight: 6 * expandedView.k
+                                property real currentHeight: 6 * expandedWaveform.barScale
 
                                 Timer {
                                     interval: 16
@@ -943,7 +1161,7 @@ ShellRoot {
                                     repeat: true
                                     onTriggered: {
                                         var rawLevel = root.levels[index] || 0.0;
-                                        var targetVal = root.playing ? (6 * expandedView.k + rawLevel * 14 * expandedView.k) : 6 * expandedView.k;
+                                        var targetVal = root.playing ? (6 * expandedWaveform.barScale + rawLevel * 14 * expandedWaveform.barScale) : 6 * expandedWaveform.barScale;
                                         var lerpFactor = targetVal > barRect.currentHeight ? 0.4 : 0.12;
                                         barRect.currentHeight += (targetVal - barRect.currentHeight) * lerpFactor;
                                     }
@@ -958,7 +1176,7 @@ ShellRoot {
                     Item {
                         id: progress
                         x: elapsedTime.x + elapsedTime.width + 16 * expandedView.k
-                        y: 180 * expandedView.k
+                        y: bigArt.y + bigArt.height + expandedView.layoutInset
                         width: Math.max(0, remainingTime.x - 16 * expandedView.k - x)
                         height: 24 * expandedView.k
 
@@ -1039,7 +1257,7 @@ ShellRoot {
                     }
                     Text {
                         id: elapsedTime
-                        x: bigArt.x
+                        x: expandedView.progressInset
                         anchors.verticalCenter: progress.verticalCenter
                         height: 32 * expandedView.k
                         verticalAlignment: Text.AlignVCenter
@@ -1051,7 +1269,7 @@ ShellRoot {
                     }
                     Text {
                         id: remainingTime
-                        x: expandedView.width - bigArt.x - width
+                        x: expandedView.width - expandedView.progressInset - width
                         anchors.verticalCenter: progress.verticalCenter
                         height: elapsedTime.height
                         verticalAlignment: Text.AlignVCenter
@@ -1064,28 +1282,31 @@ ShellRoot {
 
                     // rewind  /  play-pause  /  fast-forward, centred on the panel
                     IconButton {
+                        id: previousButton
                         width: 51 * expandedView.k
                         height: 30 * expandedView.k
-                        x: 202 * expandedView.k - width / 2
-                        y: 263 * expandedView.k - height / 2
+                        x: expandedView.width / 2 - 142 * expandedView.k - width / 2
+                        y: expandedView.controlsCenterY - height / 2
                         kind: "prev"
                         usable: root.player !== null && root.player.canGoPrevious
                         onActivated: root.player.previous()
                     }
                     IconButton {
+                        id: playPauseButton
                         width: 38 * expandedView.k
                         height: 46 * expandedView.k
-                        x: 344 * expandedView.k - width / 2
-                        y: 263 * expandedView.k - height / 2
+                        x: expandedView.width / 2 - width / 2
+                        y: expandedView.controlsCenterY - height / 2
                         kind: root.playing ? "pause" : "play"
                         usable: root.player !== null && root.player.canTogglePlaying
                         onActivated: root.player.togglePlaying()
                     }
                     IconButton {
+                        id: nextButton
                         width: 51 * expandedView.k
                         height: 30 * expandedView.k
-                        x: 486 * expandedView.k - width / 2
-                        y: 263 * expandedView.k - height / 2
+                        x: expandedView.width / 2 + 142 * expandedView.k - width / 2
+                        y: expandedView.controlsCenterY - height / 2
                         kind: "next"
                         usable: root.player !== null && root.player.canGoNext
                         onActivated: root.player.next()

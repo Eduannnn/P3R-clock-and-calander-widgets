@@ -20,14 +20,14 @@ To preview a single widget:
 quickshell -p CALENDAR
 quickshell -p P3R-CLOCK/clock.qml
 quickshell -p CAVA/cava.qml
-quickshell -p ISLAND/island.qml
+quickshell -p NOTCH/notch.qml
 ```
 
 Run only the preview you need. Stop existing copies of that widget first to avoid duplicates. If using the installed service, stop it with `systemctl --user stop p3r-widgets.service`.
 
 ## Project layout and style
 
-- Widget code lives in `CALENDAR/`, `P3R-CLOCK/`, `CAVA/`, and `ISLAND/`.
+- Widget code lives in `CALENDAR/`, `P3R-CLOCK/`, `CAVA/`, and `NOTCH/`.
 - `COMMON/` contains shared calendar styling, event integration, and moon-phase API code. Preserve relative symlinks to shared helpers and widget entry points.
 - The root `shell.qml` discovers widget entry points and watches source files for reloads.
 - Use four-space indentation, camelCase properties and functions, and PascalCase reusable QML component filenames. Use semicolons in JavaScript blocks.

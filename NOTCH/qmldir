@@ -1,0 +1,6 @@
+RibbonText 1.0 RibbonText.qml
+BluetoothNotifications 1.0 BluetoothNotifications.qml
+DeviceSymbol 1.0 DeviceSymbol.qml
+UsbNotifications 1.0 UsbNotifications.qml
+NotchCalibration 1.0 NotchCalibration.qml
+CalibrationOverlay 1.0 CalibrationOverlay.qml

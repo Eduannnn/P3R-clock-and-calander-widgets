@@ -9,7 +9,7 @@ A collection of Qt Quick/QML desktop widgets for Linux and Wayland, featuring Pe
 | **P3R Clock** | Top-right clock with a hover-to-show date, weekday/weekend banner, animated waves, time-of-day label, and glowing moon glyph. | [`P3R-CLOCK/clock.qml`](P3R-CLOCK/clock.qml) |
 | **Calendar** | Transparent, click-through desktop timeline on every screen, with an animated date transition, astronomical moon phases for each date, and a glowing active-day marker. | [`CALENDAR/CalendarView.qml`](CALENDAR/CalendarView.qml) |
 | **CAVA** | Full-width audio visualizer along the bottom of the screen, with configurable colors and a fade when audio goes silent. | [`CAVA/cava.qml`](CAVA/cava.qml) |
-| **Island** | Notch-style media widget with album artwork, track information, playback controls, seeking, and an audio visualization. | [`ISLAND/island.qml`](ISLAND/island.qml) |
+| **Notch** | Media controls, cover-art-colored audio bars, and Bluetooth/USB device connection notices. | [`NOTCH/notch.qml`](NOTCH/notch.qml) |
 
 The calendar and clock use phase names returned by the [U.S. Naval Observatory API](https://aa.usno.navy.mil/data/api.html), mapping names such as `Full Moon` and `Waning Gibbous` directly to fixed glyph presets. The calendar requests each displayed date, including past and future dates, and the clock requests today. Results are cached across restarts; uncached dates need an internet connection. While a result is unavailable, an outline is shown. The API supports dates from 1700 through 2100. The unlit portion is black on the clock and the calendar's active day, and light gray on other calendar dates.
 
@@ -18,9 +18,9 @@ The calendar and clock use phase names returned by the [U.S. Naval Observatory A
 - An internet connection to fetch uncached moon-phase dates (no API key required).
 - A Linux Wayland session with a compositor supporting the layer-shell protocol.
 - **Quickshell**, including its Qt Quick, Wayland, I/O, and MPRIS modules and Qt Quick Effects support.
-- **CAVA**, installed as `cava` on your `PATH`, for the bottom visualizer and Island's audio bars.
+- **CAVA**, installed as `cava` on your `PATH`, for the bottom visualizer and Notch's audio bars.
 - An audio backend supported by your CAVA installation. Both audio widgets default to **PipeWire**.
-- An **MPRIS-compatible media player** for Island's track information and controls.
+- An **MPRIS-compatible media player** for Notch's track information and controls.
 - **Git** to clone the repository, plus standard shell tools including `find` and `readlink`.
 
 The clock and calendar look for Impact, Anton, Bebas Neue, Oswald, Archivo Black, and Arial Black. Install a preferred font for the intended appearance; the calendar falls back to sans-serif.
@@ -85,7 +85,7 @@ cd ~/.config/quickshell/p3r
 quickshell -p P3R-CLOCK/clock.qml
 quickshell -p CALENDAR
 quickshell -p CAVA/cava.qml
-quickshell -p ISLAND/island.qml
+quickshell -p NOTCH/notch.qml
 ```
 
 Run only the command for the widget you want. The same preview commands also work from the repository directory.
@@ -172,18 +172,31 @@ Edit [`CAVA/cava.qml`](CAVA/cava.qml):
 - `silenceThreshold`, `silenceHoldMs`, and `fadeMs`: silence detection and fading.
 - `inputMethod`: audio backend, such as `"pipewire"`, `"pulse"`, or `"alsa"`, depending on your CAVA build.
 
-### Island media widget
+### Notch media widget
 
-Edit [`ISLAND/island.qml`](ISLAND/island.qml):
+Edit [`NOTCH/notch.qml`](NOTCH/notch.qml):
 
 - `screenName`: target output, initially `"eDP-1"`. The first available screen is used if no output matches.
-- `notchWidth`, `notchHeight`, and `wingWidth`: fit around your screen's notch or desired top-center area.
+- `notchWidth` and `notchHeight`: use saved calibration dimensions, falling back to 280 × 37.5 logical pixels before calibration. `wingWidth` controls the side extensions.
 - `debugNotch`: show a calibration rectangle while adjusting placement.
+- For the physical camera cutout, use the [temporary calibration overlay](NOTCH/CALIBRATION.md). Saved logical coordinates drive the layout's position, dimensions, and no-content zone.
+- `debugNotifications`: set to `true` to continuously replay the notification preview; `false` stops it.
 - `uiScale`, `animMs`, and `collapseDelayMs`: size and animation timing.
 - `accent`, `tintFromCover`, and `fontFamily`: appearance and artwork-based coloring.
-- `barCount`: audio bar count. Change the audio backend inside `cavaConfig()` if needed; Island has its own CAVA configuration.
+- `barCount`: audio bar count. Change the audio backend inside `cavaConfig()` if needed; Notch has its own CAVA configuration.
+- `bluetoothNoticeMs`: how long a device notice stays visible, initially 4 seconds.
 
-Play media in an MPRIS-compatible application, then hover over Island to expand it. Available controls and seeking depend on what the player supports.
+Play media in an MPRIS-compatible application, then hover over Notch to expand it. Available controls and seeking depend on what the player supports.
+
+Bluetooth controllers, headphones, earbuds, keyboards, mice, and other devices briefly show a white symbol on the left side of the collapsed notch. A reported Bluetooth battery level adds a ring and percentage on the right; the right wing retracts when battery information is unavailable or the device disconnects. Late battery reports update the notice while it is visible. USB controllers and audio devices are detected through `udevadm`, included with systemd. Notices work without media playback, queue when several devices change, and return to the previous media state. Existing Bluetooth connections are not announced at startup. Plain analog headphone jacks are not monitored.
+
+Preview simulated connection and disconnection notices on a running configuration:
+
+```sh
+quickshell ipc -p . call notch preview
+```
+
+The notice icons use locally extracted SF Symbols from `${XDG_DATA_HOME:-~/.local/share}/icons/SFSymbols/` when available, with system-icon fallbacks. See [the symbol exporter](NOTCH/symbol-export/README.md) to extract your own downloaded font assets. Apple artwork is kept outside this repository.
 
 Both audio widgets generate their CAVA configuration at runtime; there is no separate CAVA configuration file to install.
 
@@ -216,8 +229,8 @@ To add a widget, create `MyWidget/shell.qml` inside this repository and restart 
 - **Nothing appears:** run the launcher from a terminal and check for missing QML modules or layer-shell support. These widgets are intended for Wayland.
 - **Duplicate widgets:** stop older individual launches or autostart services, then start the combined launcher once.
 - **No audio bars:** confirm `cava` is on `PATH`, play audio, and check that each widget's configured audio backend matches your setup.
-- **Island has no track information:** use a player with MPRIS support. Enable its media integration if required.
-- **Island appears on the wrong screen:** set `screenName` to your output's name and adjust the notch dimensions.
+- **Notch has no track information:** use a player with MPRIS support. Enable its media integration if required.
+- **Notch appears on the wrong screen:** set `screenName` to your output's name and adjust the notch dimensions.
 - **Text is clipped or looks different:** install a preferred display font, then adjust the relevant font and layout properties.
 
 ## Contributing

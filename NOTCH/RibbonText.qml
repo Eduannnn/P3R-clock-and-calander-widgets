@@ -63,7 +63,7 @@ Item {
             font.weight: ribbon.weight
         }
     }
-    // The island background is black, so these small overlays soften the edges
+    // The notch background is black, so these small overlays soften the edges
     // without a shader or an extra offscreen texture for each text row.
     Rectangle {
         anchors.left: parent.left
