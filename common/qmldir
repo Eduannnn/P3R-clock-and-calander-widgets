@@ -1,0 +1,4 @@
+HyprlandQuery 1.0 HyprlandQuery.qml
+MoonPhaseProvider 1.0 MoonPhaseProvider.qml
+CalendarEvents 1.0 CalendarEvents.qml
+singleton NotchPanels 1.0 NotchPanels.qml

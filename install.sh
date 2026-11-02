@@ -31,6 +31,11 @@ if [[ "$quickshell_bin" != /* ]]; then
     exit 1
 fi
 
+# Plasma needs its native layout events for maximized and split-screen windows.
+case "${XDG_CURRENT_DESKTOP:-}" in
+    *KDE*|*kde*) "$source_dir/p3r-clock/setup-window-state.sh" ;;
+esac
+
 # Unit-file strings need escaped quotes, backslashes, and literal percent signs.
 quote_unit_value() {
     local value=$1

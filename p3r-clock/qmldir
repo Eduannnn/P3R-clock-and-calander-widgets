@@ -1,0 +1,6 @@
+MoonPhaseProvider 1.0 MoonPhaseProvider.qml
+CalendarEvents 1.0 CalendarEvents.qml
+
+WindowLayoutState 1.0 WindowLayoutState.qml
+HyprlandWindowState 1.0 HyprlandWindowState.qml
+ClockWidget 1.0 clock.qml

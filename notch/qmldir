@@ -1,0 +1,13 @@
+RibbonText 1.0 RibbonText.qml
+BluetoothNotifications 1.0 BluetoothNotifications.qml
+DeviceSymbol 1.0 DeviceSymbol.qml
+UsbNotifications 1.0 UsbNotifications.qml
+NotchCalibration 1.0 NotchCalibration.qml
+CalibrationOverlay 1.0 CalibrationOverlay.qml
+PowerNotifications 1.0 PowerNotifications.qml
+SfSymbol 1.0 SfSymbol.qml
+MotionSpring 1.0 MotionSpring.qml
+MotionContent 1.0 MotionContent.qml
+SystemOsd 1.0 SystemOsd.qml
+NotchWidget 1.0 notch.qml
+TopEdgeEars 1.0 TopEdgeEars.qml

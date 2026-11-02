@@ -1,0 +1,6 @@
+ConnectionIndicator 1.0 ConnectionIndicator.qml
+ControlCenter 1.0 ControlCenter.qml
+ControlSlider 1.0 ControlSlider.qml
+ConnectivityTile 1.0 ConnectivityTile.qml
+PowerMenu 1.0 PowerMenu.qml
+LockPowerCenter 1.0 LockPowerCenter.qml

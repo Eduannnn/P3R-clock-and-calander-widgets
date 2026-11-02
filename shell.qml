@@ -9,6 +9,10 @@ ShellRoot {
     // Each widget folder provides shell.qml. Keep references for the shell's lifetime.
     property var widgets: ({})
     property var watchedFiles: ({})
+    // Session launchers can leave unreviewed widgets disabled without editing
+    // their appearance or maintaining another copy of the shell.
+    readonly property var disabledWidgets: (Quickshell.env("P3R_WIDGETS_DISABLE") || "")
+        .split(",").map(name => name.trim().toLowerCase()).filter(name => name.length > 0)
 
     Timer {
         id: sourceReload
@@ -42,6 +46,11 @@ ShellRoot {
 
 
     function loadWidget(path) {
+        const widgetName = path.split("/").slice(-2)[0];
+        if (disabledWidgets.indexOf(widgetName) >= 0) {
+            console.log("Widget disabled for this session: " + widgetName);
+            return;
+        }
         if (widgets[path]) return;
         const component = Qt.createComponent(Qt.resolvedUrl(path), Component.PreferSynchronous, root);
         function finish() {
