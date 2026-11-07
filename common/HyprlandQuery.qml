@@ -21,6 +21,13 @@ Socket {
         requestedAt = Date.now();
         connected = true;
     }
+    function finishReply() {
+        pending = false;
+        if (refreshQueued) {
+            refreshQueued = false;
+            Qt.callLater(refresh);
+        }
+    }
     onConnectedChanged: { if (connected) { write(request); flush(); } }
     onError: { pending = false; refreshQueued = false; }
     parser: StdioCollector {
@@ -31,15 +38,12 @@ Socket {
                 if (Array.isArray(data)) {
                     if (JSON.stringify(data) !== JSON.stringify(query.result)) query.result = data;
                     query.connected = false;
+                    query.finishReply();
                 }
             } catch (error) { /* Wait for a complete JSON reply. */ }
         }
         onStreamFinished: {
-            query.pending = false;
-            if (query.refreshQueued) {
-                query.refreshQueued = false;
-                Qt.callLater(query.refresh);
-            }
+            query.finishReply();
         }
     }
 }

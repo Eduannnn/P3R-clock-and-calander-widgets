@@ -1,5 +1,7 @@
 import QtQuick
 import Quickshell.Widgets
+import "../notch" as Notch
+import "StableModel.js" as Stable
 
 ClippingRectangle {
     id: card
@@ -12,6 +14,10 @@ ClippingRectangle {
     readonly property real outputHeight: monitor ? monitor.height / monitor.scale : 1109
     readonly property var windows: controller.clients.filter(client => client.mapped && !client.hidden
         && !client.minimized && client.workspace.id === workspaceId)
+    ListModel { id: windowModel; dynamicRoles: true }
+    function synchronizeWindows() { Stable.synchronize(windowModel, windows, "address"); }
+    onWindowsChanged: Qt.callLater(synchronizeWindows)
+    Component.onCompleted: synchronizeWindows()
     height: width * outputHeight / outputWidth + 40
     radius: 12
     // Preserve the layout coordinates while clipping previews inside the
@@ -26,10 +32,12 @@ ClippingRectangle {
         Text {
             x: 12; anchors.verticalCenter: parent.verticalCenter
             text: card.workspace.name === String(card.workspaceId) ? "Desktop " + card.workspaceId : card.workspace.name
+            width: parent.width - (card.workspaceId > 1 ? 82 : 44)
+            elide: Text.ElideRight
             color: "white"; font { pixelSize: 13; weight: Font.DemiBold }
         }
         Text {
-            anchors { right: parent.right; rightMargin: 12; verticalCenter: parent.verticalCenter }
+            anchors { right: parent.right; rightMargin: card.workspaceId > 1 ? 44 : 12; verticalCenter: parent.verticalCenter }
             text: "⠿"; color: "#b0b3c1"; font.pixelSize: 18
         }
         MouseArea {
@@ -44,6 +52,25 @@ ClippingRectangle {
             }
             onCanceled: card.controller.cancelDrag()
         }
+        Rectangle {
+            anchors { right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
+            width: 24; height: 24; radius: 12
+            visible: card.workspaceId > 1
+            color: closePointer.containsMouse ? "#48484e" : "#27272b"
+            opacity: card.controller.busy ? 0.4 : 1
+            Notch.SfSymbol {
+                anchors.centerIn: parent; width: 11; height: 11
+                symbolName: "xmark"; symbolColor: "white"; fallbackIcon: "window-close"
+            }
+            MouseArea {
+                id: closePointer
+                anchors.fill: parent
+                hoverEnabled: true
+                enabled: !card.controller.busy
+                cursorShape: Qt.PointingHandCursor
+                onClicked: card.controller.deleteWorkspace(card.workspaceId)
+            }
+        }
     }
     Item {
         id: desktop
@@ -57,10 +84,10 @@ ClippingRectangle {
             visible: card.windows.length === 0
         }
         Repeater {
-            model: card.windows
+            model: windowModel
             delegate: WindowPreview {
-                required property var modelData
-                client: modelData
+                required property var entry
+                client: entry
                 x: (client.at[0] - (card.monitor ? card.monitor.x : 0)) / card.outputWidth * desktop.width
                 y: (client.at[1] - (card.monitor ? card.monitor.y : 0)) / card.outputHeight * desktop.height
                 width: Math.max(12, client.size[0] / card.outputWidth * desktop.width)

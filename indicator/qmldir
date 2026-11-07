@@ -4,3 +4,6 @@ ControlSlider 1.0 ControlSlider.qml
 ConnectivityTile 1.0 ConnectivityTile.qml
 PowerMenu 1.0 PowerMenu.qml
 LockPowerCenter 1.0 LockPowerCenter.qml
+AudioOutputSelector 1.0 AudioOutputSelector.qml
+WifiNetworks 1.0 WifiNetworks.qml
+ControlToggle 1.0 ControlToggle.qml

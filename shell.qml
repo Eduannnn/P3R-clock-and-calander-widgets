@@ -75,7 +75,7 @@ ShellRoot {
         running: true
         // A fixed script with a separate path argument also handles spaces safely.
         command: ["sh", "-c",
-            'for entry in "$1"/*/shell.qml; do if [ -f "$entry" ]; then printf "%s\\n" "$entry"; fi; done',
+            'if [ -f "$1/taskbar/shell.qml" ]; then printf "%s\\n" "$1/taskbar/shell.qml"; fi; for entry in "$1"/*/shell.qml; do if [ -f "$entry" ] && [ "$entry" != "$1/taskbar/shell.qml" ]; then printf "%s\\n" "$entry"; fi; done',
             "widget-discovery", Quickshell.shellDir]
         stdout: SplitParser {
             onRead: path => { if (path.length > 0) root.loadWidget(path); }

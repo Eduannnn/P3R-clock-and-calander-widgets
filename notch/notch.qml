@@ -10,6 +10,7 @@ import Quickshell.Services.Mpris
 import Quickshell.Io
 import "../indicator" as Indicator
 import "../common" as Common
+import "MediaIdentity.js" as MediaIdentity
 
 ShellRoot {
     id: root
@@ -144,7 +145,6 @@ ShellRoot {
     property string fontFamily: "sans-serif"
     property int    animMs: 250              // Spring response tempo, not a fixed settling duration
     property int    entranceMs: 360          // Gentler side-content reveal when media first starts
-    property int    pausedLingerMs: 12000
     property int    trackPeekMs: 3500
     property int    collapseDelayMs: 350
     property int    bluetoothNoticeMs: 4000
@@ -481,7 +481,8 @@ ShellRoot {
     readonly property var  player: pickPlayer()
     readonly property bool playing: player !== null && player.playbackState === MprisPlaybackState.Playing
 
-    property bool shown: false
+    // Pausing keeps the controls available; removing the media session hides them.
+    readonly property bool shown: player !== null
     property bool peek: false
     property bool hovering: false
     property bool hoverLatch: false
@@ -499,37 +500,33 @@ ShellRoot {
     }
 
     onPlayingChanged: {
-        if (playing) { shown = true; lingerTimer.stop(); }
-        else if (shown) lingerTimer.restart();
+        if (playing) scheduleTrackPeek();
     }
 
-    // Debounce metadata updates so one track switch produces one peek.
+    // Browser track IDs can change during one video. Peek only for new content.
     property bool trackWatchingReady: false
-    property var lastPeekPlayer: null
     property var lastPeekTrack: null
     function scheduleTrackPeek() {
-        if (trackWatchingReady) trackChangeTimer.restart();
+        // Batch one metadata burst without letting frequent updates defer it.
+        if (trackWatchingReady && !trackChangeTimer.running) trackChangeTimer.start();
     }
     Component.onCompleted: {
         rememberDuration();
-        if (playing) shown = true;
-        lastPeekPlayer = player;
-        lastPeekTrack = player ? player.uniqueId : null;
+        lastPeekTrack = player ? MediaIdentity.snapshot(player) : null;
         trackWatchingReady = true;
     }
     Timer {
         id: trackChangeTimer
-        interval: 180
+        interval: 32
         onTriggered: {
             const p = root.player;
-            if (!p || !p.trackTitle) return;
-            if (root.lastPeekPlayer === p && root.lastPeekTrack === p.uniqueId) return;
-            root.lastPeekPlayer = p;
-            root.lastPeekTrack = p.uniqueId;
-            root.shown = true;
+            if (!root.playing || !p || !p.trackTitle) return;
+            const nextTrack = MediaIdentity.snapshot(p);
+            const unchanged = MediaIdentity.sameTrack(root.lastPeekTrack, nextTrack);
+            root.lastPeekTrack = nextTrack;
+            if (unchanged) return;
             root.peek = true;
             peekTimer.restart();
-            if (!root.playing) lingerTimer.restart();
         }
     }
 
@@ -545,12 +542,6 @@ ShellRoot {
         interval: Math.max(root.trackPeekMs, compactView.textReadMs)
         onTriggered: root.peek = false
     }
-    Timer {
-        id: lingerTimer
-        interval: root.pausedLingerMs
-        onTriggered: { if (root.hoverLatch || root.scrubbing || root.peek) lingerTimer.restart(); else root.shown = false; }
-    }
-
     // Keep the playback clock separate from the pointer's seek preview.
     // Temporary diagnostics: disable after the live seeking issue is resolved.
     property bool debugSeeking: false
@@ -569,6 +560,7 @@ ShellRoot {
     }
     Connections {
         target: root.player
+        function onMetadataChanged() { root.scheduleTrackPeek(); }
         function onTrackTitleChanged() { root.scheduleTrackPeek(); }
         function onLengthChanged() { root.rememberDuration(); }
         function onLengthSupportedChanged() {
@@ -614,10 +606,8 @@ ShellRoot {
         logSeek("player-changed");
         scheduleTrackPeek();
         if (player === null) {
-            shown = false;
             peek = false;
             peekTimer.stop();
-            lingerTimer.stop();
         }
     }
     onExpandedChanged: { if (expanded) refreshPos(); }

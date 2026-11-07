@@ -9,12 +9,16 @@ import "MoonPhase.js" as MoonPhase
 import Quickshell
 import Quickshell.Wayland
 import "../notch" as Notch
+import "../common" as Common
 
 ShellRoot {
     id: clockRoot
     property Item embeddedParent: null
     property var embeddedScreen: null
     property bool embeddedFullView: false
+    readonly property bool nativeFullscreen: embeddedParent === null
+        && Common.FullscreenState.nativeScreen !== ""
+        && Common.FullscreenState.nativeScreen === win.screen?.name
     WindowLayoutState {
         id: windowLayoutState
         screen: win.screen
@@ -677,8 +681,10 @@ ShellRoot {
                 shadowVerticalOffset: 1
                 shadowHorizontalOffset: 0
             }
-            opacity: win.compactProgress
-            visible: opacity > 0
+            opacity: win.compactProgress * (!clockRoot.nativeFullscreen || nativeClockHover.hovered ? 1 : 0)
+            visible: clockRoot.nativeFullscreen || opacity > 0
+            Behavior on opacity { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+            HoverHandler { id: nativeClockHover; enabled: clockRoot.nativeFullscreen }
             anchors { right: parent.right; rightMargin: 8 + win.statusSlot + (clockRoot.embeddedParent ? 3 : 0) }
             y: 1 + 6 * (1 - win.compactProgress)
             height: win.minimalHeight

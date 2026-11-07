@@ -20,9 +20,10 @@ Item {
     }
     property bool wifiConnected: false
     property int wifiSignal: 0
+    property bool iphoneTethered: false
     readonly property var battery: UPower.devices.values.find(device => device.isLaptopBattery && device.isPresent) || null
     readonly property real batteryLevel: battery && battery.ready ? Math.max(0, Math.min(1, battery.percentage)) : -1
-    readonly property color ringColor: "white"
+    readonly property color ringColor: PowerProfiles.profile === PowerProfile.PowerSaver ? "#ffd60a" : "white"
 
     Canvas {
         id: ring
@@ -54,20 +55,21 @@ Item {
         anchors.centerIn: parent
         width: parent.width * 0.55
         height: parent.height * 0.55
-        symbolName: indicator.wifiConnected ? "wifi" : "wifi.slash"
+        symbolName: indicator.iphoneTethered ? "personalhotspot" : indicator.wifiConnected ? "wifi" : "wifi.slash"
         symbolColor: "white"
-        fallbackIcon: indicator.wifiConnected ? "network-wireless-connected" : "network-wireless-offline"
+        fallbackIcon: indicator.iphoneTethered ? "network-wired" : indicator.wifiConnected ? "network-wireless-connected" : "network-wireless-offline"
     }
     Process {
         id: wifiQuery
         running: indicator.visible
-        // Read NetworkManager's cached AP state; never trigger a Wi-Fi scan.
-        command: ["nmcli", "--terse", "--fields", "IN-USE,SIGNAL", "device", "wifi", "list", "--rescan", "no"]
+        command: ["sh", Qt.resolvedUrl("connection-status.sh").toString().replace(/^file:\/\//, "").replace(/^qs:/, "")]
         stdout: StdioCollector {
             onStreamFinished: {
-                const active = text.split("\n").find(line => line.startsWith("*:"));
+                const lines = text.trim().split("\n");
+                const active = lines.find(line => line.startsWith("wifi:"));
                 indicator.wifiConnected = active !== undefined;
-                indicator.wifiSignal = active ? Number(active.split(":")[1]) : 0;
+                indicator.wifiSignal = active ? Number(active.slice(5)) : 0;
+                indicator.iphoneTethered = lines.includes("iphone:true");
             }
         }
     }

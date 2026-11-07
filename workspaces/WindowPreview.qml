@@ -20,11 +20,19 @@ Rectangle {
         paintCursor: false
         constraintSize: Qt.size(Math.ceil(width * 1.5), Math.ceil(height * 1.5))
     }
+    ShaderEffectSource {
+        anchors.fill: capture
+        sourceItem: capture
+        hideSource: true
+        live: capture.hasContent
+    }
     Image {
-        anchors.centerIn: parent
-        width: Math.min(32, parent.width / 2); height: width
+        // Keep a stable badge over the live preview. A screencopy frame can
+        // briefly be unavailable while an app resizes or changes workspace.
+        anchors { left: parent.left; top: parent.top; margins: 5 }
+        width: Math.min(22, parent.width / 3); height: width
         source: Quickshell.iconPath(tile.client.class.toLowerCase(), true)
-        visible: !capture.hasContent
+        visible: status === Image.Ready
     }
     Rectangle {
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }

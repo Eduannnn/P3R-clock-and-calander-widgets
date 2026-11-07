@@ -7,6 +7,7 @@ import Quickshell.Hyprland
 import "../common" as Common
 import "WorkspaceOrder.js" as Order
 import "OverviewMotion.js" as Motion
+import "StableModel.js" as Stable
 import "../notch" as Notch
 import "../indicator" as Indicator
 
@@ -25,6 +26,7 @@ ShellRoot {
     property real gestureTravel: 0
     property var samples: []
     property var workspaces: []
+    ListModel { id: workspaceModel; dynamicRoles: true }
     property var clients: []
     property var monitors: []
     property int activeWorkspace: 1
@@ -76,6 +78,7 @@ ShellRoot {
     function synchronize() {
         if (pointerBusy || busy) return;
         workspaces = spacesQuery.result.filter(workspace => workspace.id > 0).sort((a, b) => a.id - b.id);
+        Stable.synchronize(workspaceModel, workspaces, "id");
         clients = clientsQuery.result;
         monitors = monitorsQuery.result;
         const focused = monitors.find(monitor => monitor.focused);
@@ -109,6 +112,11 @@ ShellRoot {
         if (source === target) return;
         try { execute(Order.reorderLua(Order.movePlan(workspaces.map(workspace => workspace.id), source, target))); }
         catch (error) { message = error.message; }
+    }
+    function deleteWorkspace(id) {
+        if (busy || !Number.isInteger(id) || id <= 1) return;
+        cancelDrag();
+        execute(Order.deleteLua(id));
     }
     function beginPointer(source, area, mouse) {
         if (busy) return;
@@ -270,11 +278,11 @@ ShellRoot {
                         spacing: 12
                         x: Math.max(0, (desktopStrip.width - implicitWidth) / 2)
                         Repeater {
-                            model: overview.workspaces
+                            model: workspaceModel
                             delegate: WorkspaceCard {
-                                required property var modelData
+                                required property var entry
                                 width: 206
-                                workspace: modelData
+                                workspace: entry
                                 controller: overview
                             }
                         }
